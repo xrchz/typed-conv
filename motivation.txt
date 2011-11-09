@@ -1,0 +1,29 @@
+Conversions have ML type term -> thm, but in reality the minimum we expect is
+that a conversion takes a term t and produces a theorem |- t = t' (for some
+term t'). We would expect even more from conversions producing normal forms.
+For example an NNF conversion would be expected to take t to |- t = nnf(t),
+where nnf(t) ) is the term t in negation normal form. Furthermore the
+conversion might require that the input t is already in a specific form, say
+closed_formula(t) meaning a closed term of type bool. All of this information
+is left out of the ML type system.
+
+But it would be possible to include this information in a richer type system.
+Why would we want this information in the type system? Because conversions are
+easier to use and reuse if you know what they are doing. Currently (e.g. in
+HOL4) the only clues about what a conversion might do are in its name, comments
+surrounding its description, and the code implementing it itself. The code
+would often require a significant time investment to read and understand. The
+name and comments are liable to be wrong for at least two reasons: code evolves
+faster than documentation, and people make mistakes in reasoning about what the
+code does. (Examples?) The advantage of putting more information in the type
+system is that it is always current and always correct.
+
+An additional benefit is that a type-checked program with a rich type has
+essentially been proved correct. Optimizations and tricks in the code can be
+added safely (albeit maybe not easily) without compromising correctness. 
+
+Conversions are often strung together (with the THENC combinator). In this
+situation, knowing exactly what each one does is important for the reasoning
+about the combined conversion. This can also open up opportunities for
+optimization, for example by skipping steps on terms that are already known to
+be in a certain good form (examples?).
