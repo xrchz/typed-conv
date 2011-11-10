@@ -3,6 +3,7 @@ module Hol where
 open import Data.String
 open import Data.Nat
 open import Data.Vec
+open import Data.Bool
 
 record TypeOperator : Set where
   field name  : String
@@ -26,8 +27,13 @@ record Constant : Set where
   field name : String
         type : Type
 
-data Term : Type -> Set where
-  Var   : String -> (t : Type) -> Term t
-  Const : (c : Constant) -> Term (Constant.type c)
-  App   : ∀ {x} {y} -> Term (x ⇒ y) -> Term x -> Term y
-  Abs   : ∀ {x} {y} -> Term x -> Term y -> Term (x ⇒ y)
+data Term : {_ : Type} -> {_ : Bool} -> Set where
+  Var   : String -> (t : Type) -> Term {t} {true}
+  Const : (c : Constant) -> Term {Constant.type c} {false}
+  App   : ∀ {x} {y} {b1} {b2} -> Term {x ⇒ y} {b1} -> Term {x} {b2} -> Term {y} {false}
+  Abs   : ∀ {x} {y} {b} -> Term {x} {true} -> Term {y} {b} -> Term {x ⇒ y} {false}
+
+-- Formula : Bool -> Set
+-- Formula = Term bool
+
+-- data Thm : Formula -> FinSet Formula where
