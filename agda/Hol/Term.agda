@@ -1,7 +1,8 @@
-module Hol where
+module Hol.Term where
 
-open import Hol.Type using (Type)
+open import Hol.Type using (_str<_;Type;α;_⇒_;bool) renaming (_<_ to _ty<_)
 open import Data.AVL.Sets using ()
+open import Data.String using (String)
 
 record Constant : Set where
   field name : String
@@ -22,9 +23,6 @@ Formula = Term {bool}
 
 -- strict total order on terms?
 -- alpha equivalence?
-
-α : Type
-α = TyVar "A"
 
 equality : Constant
 equality = record { name = "="; type = α ⇒ α ⇒ bool }

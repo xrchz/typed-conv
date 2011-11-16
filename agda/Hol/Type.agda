@@ -45,3 +45,6 @@ bool_tyop : TypeOperator
 bool_tyop = record { name = "bool"; arity = 0 }
 bool : Type
 bool = TyApp bool_tyop []
+
+α : Type
+α = TyVar "A"
