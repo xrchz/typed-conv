@@ -18,6 +18,20 @@ data Term : {_ : Type} -> Set where
   App   : ∀ {x} {y} -> Term {x ⇒ y} -> Term {x} -> Term {y}
   Abs   : ∀ {y} -> (v : Variable) -> Term {y} -> Term {(Variable.type v) ⇒ y}
 
+open import Relation.Binary using (Rel)
+open import Relation.Binary.Product.StrictLex using (×-Lex)
+open import Data.Product using (_,_)
+open import Relation.Binary.Core using (_≡_)
+open import Function using (_on_)
+
+infix 4 _var<_
+_var<_ : Rel Variable _
+_var<_ = ×-Lex _≡_ _str<_  _ty<_ on (λ v → Variable.name v , Variable.type v)
+
+-- infix 4 _<_
+-- data _<_ : Rel Term _ where
+--   Var<Var :
+
 Formula : Set
 Formula = Term {bool}
 

@@ -12,15 +12,44 @@ data Type : Set where
   TyVar : String → Type
   TyApp : (op : TypeOperator) → Vec Type (TypeOperator.arity op) → Type
 
-open import Relation.Binary using (Rel)
-open import Relation.Binary.List.StrictLex using (Lex-<)
-open import Data.Char using ()
+open import Relation.Binary using (Rel;IsStrictTotalOrder;Transitive)
+open import Relation.Binary.List.StrictLex as ListLex using (Lex-<)
+import Data.Char
 open import Relation.Binary.Core using (_≡_)
-open import Function using (_on_)
+open import Function using (_on_;_∘_)
+
+import Data.List
+import Relation.Binary.List.Pointwise as Pointwise
+
+infix 4 _ListChar<_
+_ListChar<_ : Rel (Data.List.List Data.Char.Char) _
+_ListChar<_ = Lex-< _≡_ (_N<_ on Data.Char.toNat)
+
+ListChar<-isStrictTotalOrder : IsStrictTotalOrder (Pointwise.Rel _≡_) _ListChar<_
+ListChar<-isStrictTotalOrder = ListLex.<-isStrictTotalOrder {!!}
 
 infix 4 _str<_
 _str<_ : Rel String _
-_str<_ = Lex-< _≡_ (_N<_ on Data.Char.toNat) on (Data.String.toList)
+_str<_ = _ListChar<_ on (Data.String.toList)
+
+open import Relation.Binary using (IsEquivalence)
+
+IsEquivalence-on : ∀ {a b l} {A : Set a} {B : Set b} {_≈_ : Rel A l} {f : B → A} → IsEquivalence _≈_ → IsEquivalence (_≈_ on f)
+IsEquivalence-on e = record { refl = IsEquivalence.refl e ; sym = IsEquivalence.sym e ; trans = IsEquivalence.trans e }
+
+Transitive-on : ∀ {a b l} {A : Set a} {B : Set b} {_<_ : Rel A l} {f : B → A} → Transitive _<_ → Transitive (_<_ on f)
+Transitive-on t = t
+
+IsStrictTotalOrder-on : ∀ {a b l₁ l₂} {A : Set a} {B : Set b} {_≈_ : Rel A l₁} {_<_ : Rel A l₂} {f : B → A} → IsStrictTotalOrder _≈_ _<_ → IsStrictTotalOrder (_≈_ on f) (_<_ on f)
+IsStrictTotalOrder-on {_<_ = _<_} {f = f} sto = record
+  { isEquivalence = IsEquivalence-on (IsStrictTotalOrder.isEquivalence sto)
+  ; trans = Transitive-on {_<_ = _<_} {f = f} (IsStrictTotalOrder.trans sto)
+  ; compare = {!!}
+  ; <-resp-≈ = {!!}
+  }
+
+str<-isStrictTotalOrder : IsStrictTotalOrder (_≡_ on Data.String.toList) _str<_
+str<-isStrictTotalOrder = IsStrictTotalOrder-on {!!} -- (ListLex.<-isStrictTotalOrder ?)
 
 open import Relation.Binary.Product.StrictLex using (×-Lex)
 open import Data.Product using (_,_)
@@ -34,6 +63,19 @@ data _<_ : Rel Type _ where
   TyVar<TyVar : ∀ {s₁} {s₂} → (s₁<s₂ : s₁ str< s₂) → TyVar s₁ < TyVar s₂
   TyVar<TyApp : ∀ {s} {op} {as} → TyVar s < TyApp op as
   TyApp<TyApp : ∀ {op₁} {as₁} {op₂} {as₂} → ×-Lex _≡_ _op<_ (Lex-< _≡_ _<_) (op₁ , Data.Vec.toList as₁) (op₂ , Data.Vec.toList as₂) → TyApp op₁ as₁ < TyApp op₂ as₂
+
+import Relation.Binary.PropositionalEquality
+
+isTransitive : Transitive _<_
+isTransitive (TyVar<TyVar s₁<s₂) (TyVar<TyVar s₂<s₃) = {!!}
+isTransitive _ _ = {!!}
+
+isStrictTotalOrder : IsStrictTotalOrder _≡_ _<_
+isStrictTotalOrder = record {
+  isEquivalence = Relation.Binary.PropositionalEquality.isEquivalence;
+  trans = {!!};
+  compare = {!!};
+  <-resp-≈ = {!!} }
 
 fun_tyop : TypeOperator
 fun_tyop = record { name = "->"; arity = 2 }
