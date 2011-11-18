@@ -14,25 +14,38 @@ data Type : Set where
 
 open import Relation.Binary using (Rel;IsStrictTotalOrder;StrictTotalOrder;Transitive)
 open import Relation.Binary.List.StrictLex as ListLex using (Lex-<)
-import Data.Char
 open import Relation.Binary.Core using (_≡_)
 open import Function using (_on_;_∘_)
 
 import Data.List
 import Relation.Binary.List.Pointwise as Pointwise
 import Relation.Binary.PropositionalEquality as PropEq
-open import Data.Nat.Properties renaming (<-trans to N<-trans; strictTotalOrder to Nsto)
 import Level
+open import Relation.Binary using () renaming (IsStrictTotalOrder to ISTO;StrictTotalOrder to STO)
+open import Data.Nat.Properties renaming (<-trans to N<-trans; strictTotalOrder to Nsto)
+import Data.Char
+import Relation.Binary.On as RelOn
+
+infix 4 _Char<_
+_Char<_ : Rel Data.Char.Char _
+_Char<_ = _N<_ on Data.Char.toNat
+
+Char<-StrictTotalOrder = record
+  { Carrier            = Data.Char.Char
+  ; _≈_                = _≡_ on Data.Char.toNat
+  ; _<_                = _Char<_
+  ; isStrictTotalOrder = RelOn.isStrictTotalOrder Data.Char.toNat (STO.isStrictTotalOrder Nsto)
+  }
 
 infix 4 _ListChar<_
 _ListChar<_ : Rel (Data.List.List Data.Char.Char) _
-_ListChar<_ = Lex-< _≡_ (_N<_ on Data.Char.toNat)
+_ListChar<_ = Lex-< _≡_ _Char<_
 
 ListChar<-isStrictTotalOrder : IsStrictTotalOrder (Pointwise.Rel _≡_) _ListChar<_
 ListChar<-isStrictTotalOrder = ListLex.<-isStrictTotalOrder record
   { isEquivalence = PropEq.isEquivalence
   ; trans = N<-trans
-  ; compare = {!(IsStrictTotalOrder.compare (StrictTotalOrder.isStrictTotalOrder Nsto)) on Data.Char.toNat!}
+  ; compare = ISTO.compare (STO.isStrictTotalOrder {!Nsto!})
   ; <-resp-≈ = {!!}
   }
 
