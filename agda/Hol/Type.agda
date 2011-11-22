@@ -14,7 +14,7 @@ import Relation.Binary.On as On
 
 _S<_ = StrictTotalOrder._<_ StringSTO
 S<-trans : Transitive _S<_
-S<-trans = StrictTotalOrder.trans StringSTO
+S<-trans {i} {j} {k} = StrictTotalOrder.trans StringSTO {i} {j} {k}
 S<-cmp   : Trichotomous _ _S<_
 S<-cmp   = StrictTotalOrder.compare StringSTO
 
