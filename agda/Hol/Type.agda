@@ -15,8 +15,8 @@ import Relation.Binary.On as On
 _S<_ = StrictTotalOrder._<_ StringSTO
 S<-trans : Transitive _S<_
 S<-trans {i} {j} {k} = StrictTotalOrder.trans StringSTO {i} {j} {k}
-S<-cmp   : Trichotomous _ _S<_
-S<-cmp   = StrictTotalOrder.compare StringSTO
+S<-cmp : Trichotomous _ _S<_
+S<-cmp = StrictTotalOrder.compare StringSTO
 
 record TypeOperator : Set where
   field name  : String
@@ -28,10 +28,10 @@ data Type : Set where
 
 infix 4 _op<_
 _op<_ : Rel TypeOperator _
-_op<_ = ×-Lex _≡_ _S<_ _N<_ on (λ op -> TypeOperator.name op , TypeOperator.arity op)
+_op<_ = ×-Lex _≡_ _S<_ _N<_ on (λ op → TypeOperator.name op , TypeOperator.arity op)
 
 op<-trans : Transitive _op<_
-op<-trans = On.transitive _ _ (×-transitive PropEq.isEquivalence (PropEq.resp₂ _S<_) S<-trans N<-trans)
+op<-trans = On.transitive (λ op → TypeOperator.name op , TypeOperator.arity op) (×-Lex _≡_ _S<_ _N<_) (×-transitive PropEq.isEquivalence (PropEq.resp₂ _S<_) (λ {i} {j} {k} → S<-trans {i} {j} {k}) {_≤₂_ = _N<_} N<-trans)
 
 infix 4 _<_
 data _<_ : Rel Type _ where
@@ -40,10 +40,10 @@ data _<_ : Rel Type _ where
   TyApp<TyApp : ∀ {op₁} {as₁} {op₂} {as₂} → ×-Lex _≡_ _op<_ (Lex-< _≡_ _<_) (op₁ , Vec→List as₁) (op₂ , Vec→List as₂) → TyApp op₁ as₁ < TyApp op₂ as₂
 
 <-trans : Transitive _<_
-<-trans (TyVar<TyVar p) (TyVar<TyVar q) = TyVar<TyVar (S<-trans p q)
+<-trans (TyVar<TyVar {i} {j} p) (TyVar<TyVar {s₂ = k} q) = TyVar<TyVar (S<-trans {i} {j} {k} p q)
 <-trans (TyVar<TyVar _) TyVar<TyApp = TyVar<TyApp
 <-trans TyVar<TyApp (TyApp<TyApp _) = TyVar<TyApp
-<-trans (TyApp<TyApp p) (TyApp<TyApp q) = TyApp<TyApp (×-transitive PropEq.isEquivalence (PropEq.resp₂ _op<_) op<-trans (Lex<-trans PropEq.isEquivalence (PropEq.resp₂ _<_) <-trans) p q)
+<-trans (TyApp<TyApp p) (TyApp<TyApp q) = TyApp<TyApp (×-transitive PropEq.isEquivalence (PropEq.resp₂ _op<_) op<-trans {_≤₂_ = Lex-< _≡_ _<_ } (Lex<-trans PropEq.isEquivalence (PropEq.resp₂ _<_) <-trans) p q)
 
 <-cmp : Trichotomous _≡_ _<_
 <-cmp (TyVar _) (TyVar _) = {!!}
