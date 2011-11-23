@@ -6,11 +6,12 @@ open import Data.Nat.Properties using () renaming (<-trans to N<-trans)
 open import Data.Vec using (Vec;_∷_;[_];[]) renaming (toList to Vec→List)
 open import Data.Product using (_,_)
 open import Function using (_on_)
-open import Relation.Binary using (Rel;IsStrictTotalOrder;StrictTotalOrder;Transitive;Trichotomous)
+open import Relation.Binary using (Rel;IsStrictTotalOrder;StrictTotalOrder;Transitive;Trichotomous;tri<;tri≈;tri>)
 open import Relation.Binary.PropositionalEquality as PropEq using (_≡_)
 open import Relation.Binary.Product.StrictLex using (×-Lex;×-transitive)
 open import Relation.Binary.List.StrictLex using (Lex-<) renaming (transitive to Lex<-trans)
 import Relation.Binary.On as On
+open import Relation.Nullary using (¬_)
 
 _S<_ = StrictTotalOrder._<_ StringSTO
 S<-trans : Transitive _S<_
@@ -45,9 +46,15 @@ data _<_ : Rel Type _ where
 <-trans TyVar<TyApp (TyApp<TyApp _) = TyVar<TyApp
 <-trans (TyApp<TyApp p) (TyApp<TyApp q) = TyApp<TyApp (×-transitive PropEq.isEquivalence (PropEq.resp₂ _op<_) op<-trans {_≤₂_ = Lex-< _≡_ _<_ } (Lex<-trans PropEq.isEquivalence (PropEq.resp₂ _<_) <-trans) p q)
 
+TyVar-inj : ∀ x y → ¬ (x ≡ y) → ¬ (TyVar x ≡ TyVar y)
+TyVar-inj x .x ne PropEq.refl = ne PropEq.refl
+
 <-cmp : Trichotomous _≡_ _<_
-<-cmp (TyVar _) (TyVar _) = {!!}
-<-cmp (TyVar _) (TyApp _ _) = {!!}
+<-cmp (TyVar s₁) (TyVar s₂) with S<-cmp s₁ s₂
+... | tri< a ¬b ¬c = tri< (TyVar<TyVar a) (TyVar-inj s₁ s₂ {!¬b!}) {!!}
+... | tri≈ ¬a b ¬c = {!!}
+... | tri> ¬a ¬b c = {!!}
+<-cmp (TyVar _) (TyApp _ _) = tri< TyVar<TyApp (λ ()) {!!}
 <-cmp (TyApp _ _) (TyVar _) = {!!}
 <-cmp (TyApp _ _) (TyApp _ _) = {!!}
 
