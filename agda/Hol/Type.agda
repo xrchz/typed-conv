@@ -1,23 +1,24 @@
-module Hol.Type where
+open import Name using (Name)
 
-open import Data.String using (String) renaming (strictTotalOrder to StringSTO)
+module Hol.Type (Names : Name) where
+
 open import Data.Nat using (ℕ) renaming (_<_ to _N<_)
 open import Data.Nat.Properties using () renaming (<-trans to N<-trans)
 open import Data.Vec using (Vec;_∷_;[_];[]) renaming (toList to Vec→List)
 open import Data.Product using (_,_)
 open import Function using (_on_)
-open import Relation.Binary using (Rel;IsStrictTotalOrder;StrictTotalOrder;Transitive;Trichotomous;tri<;tri≈;tri>)
-open import Relation.Binary.PropositionalEquality as PropEq using (_≡_)
+open import Relation.Binary using (Rel;StrictTotalOrder;IsStrictTotalOrder;Transitive;Trichotomous;tri<;tri≈;tri>)
 open import Relation.Binary.Product.StrictLex using (×-Lex;×-transitive)
 open import Relation.Binary.List.StrictLex using (Lex-<) renaming (transitive to Lex<-trans)
+open import Relation.Binary.PropositionalEquality as PropEq using (_≡_)
 import Relation.Binary.On as On
 open import Relation.Nullary using (¬_)
 
-_S<_ = StrictTotalOrder._<_ StringSTO
-S<-trans : Transitive _S<_
-S<-trans {i} {j} {k} = StrictTotalOrder.trans StringSTO {i} {j} {k}
-S<-cmp : Trichotomous _ _S<_
-S<-cmp = StrictTotalOrder.compare StringSTO
+String = Name.Carrier Names
+fromString = Name.fromString Names
+_S<_ = Name._<_ Names
+S<-trans = Name.trans Names
+S<-cmp   = Name.compare Names
 
 record TypeOperator : Set where
   field name  : String
@@ -32,7 +33,7 @@ _op<_ : Rel TypeOperator _
 _op<_ = ×-Lex _≡_ _S<_ _N<_ on (λ op → TypeOperator.name op , TypeOperator.arity op)
 
 op<-trans : Transitive _op<_
-op<-trans = On.transitive (λ op → TypeOperator.name op , TypeOperator.arity op) (×-Lex _≡_ _S<_ _N<_) (×-transitive PropEq.isEquivalence (PropEq.resp₂ _S<_) (λ {i} {j} {k} → S<-trans {i} {j} {k}) {_≤₂_ = _N<_} N<-trans)
+op<-trans = On.transitive (λ op → TypeOperator.name op , TypeOperator.arity op) (×-Lex _≡_ _S<_ _N<_) (×-transitive PropEq.isEquivalence (PropEq.resp₂ _S<_) S<-trans {_≤₂_ = _N<_} N<-trans)
 
 infix 4 _<_
 data _<_ : Rel Type _ where
@@ -41,7 +42,7 @@ data _<_ : Rel Type _ where
   TyApp<TyApp : ∀ {op₁} {as₁} {op₂} {as₂} → ×-Lex _≡_ _op<_ (Lex-< _≡_ _<_) (op₁ , Vec→List as₁) (op₂ , Vec→List as₂) → TyApp op₁ as₁ < TyApp op₂ as₂
 
 <-trans : Transitive _<_
-<-trans (TyVar<TyVar {i} {j} p) (TyVar<TyVar {s₂ = k} q) = TyVar<TyVar (S<-trans {i} {j} {k} p q)
+<-trans (TyVar<TyVar {i} {j} p) (TyVar<TyVar {s₂ = k} q) = TyVar<TyVar (S<-trans p q)
 <-trans (TyVar<TyVar _) TyVar<TyApp = TyVar<TyApp
 <-trans TyVar<TyApp (TyApp<TyApp _) = TyVar<TyApp
 <-trans (TyApp<TyApp p) (TyApp<TyApp q) = TyApp<TyApp (×-transitive PropEq.isEquivalence (PropEq.resp₂ _op<_) op<-trans {_≤₂_ = Lex-< _≡_ _<_ } (Lex<-trans PropEq.isEquivalence (PropEq.resp₂ _<_) <-trans) p q)
@@ -70,15 +71,15 @@ strictTotalOrder = record
   }
 
 fun_tyop : TypeOperator
-fun_tyop = record { name = "->"; arity = 2 }
+fun_tyop = record { name = fromString "->"; arity = 2 }
 infixr 30 _=>_
 _=>_     : Type -> Type -> Type
 t₁ => t₂ = TyApp fun_tyop (t₁ ∷ [ t₂ ])
 
 bool_tyop : TypeOperator
-bool_tyop = record { name = "bool"; arity = 0 }
+bool_tyop = record { name = fromString "bool"; arity = 0 }
 bool : Type
 bool = TyApp bool_tyop []
 
 α : Type
-α = TyVar "A"
+α = TyVar (fromString "A")
