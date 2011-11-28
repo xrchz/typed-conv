@@ -1,0 +1,4 @@
+What is a good simple conversion to try first?
+How about NNF? Implementation in HOL4 is hairy.
+No, something really simple would be SYM_CONV or RAND_CONV or LHS_CONV.
+Then try ABS_CONV.
