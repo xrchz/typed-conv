@@ -1,5 +1,5 @@
+{-# OPTIONS --sized-types #-}
 open import Name using (Name)
-
 module Hol.Type (Names : Name) where
 
 open import Data.Nat using (ℕ) renaming (_<_ to _N<_)
@@ -19,6 +19,7 @@ import Relation.Binary.On as On
 open import Relation.Binary.PropositionalEquality as PropEq using (_≡_;refl;sym;cong;→-to-⟶)
 open import Relation.Nullary using (¬_)
 open import Level using (_⊔_)
+open import Size using (Size;↑_)
 
 String = Name.Carrier Names
 fromString = Name.fromString Names
@@ -52,15 +53,13 @@ op<-trans = On.transitive op→pair (×-Lex _≡_ _S<_ _N<_) (×-transitive Prop
 -- can such a thing not be defined automatically?
 -- maybe should define the order on vectors separately?
 infix 4 _<_
-data _<_ : Rel Type _ where
-  TyVar<TyVar : ∀ {s₁} {s₂} → (s₁<s₂ : s₁ S< s₂) → TyVar s₁ < TyVar s₂
-  TyVar<TyApp : ∀ {s} {op} {as} → TyVar s < TyApp op as
-  TyApp<TyApp : ∀ {op₁} {as₁} {op₂} {as₂} → ×-Lex _≡_ _op<_ (Lex-< _≡_ _<_) (op₁ , Vec→List as₁) (op₂ , Vec→List as₂) → TyApp op₁ as₁ < TyApp op₂ as₂
+data _<_ : {z : Size} → Rel Type Level.zero where
+  TyVar<TyVar : ∀ {z} {s₁} {s₂} → (s₁<s₂ : s₁ S< s₂) → _<_ {↑ z} (TyVar s₁) (TyVar s₂)
+  TyVar<TyApp : ∀ {z} {s} {op} {as} → _<_ {↑ z} (TyVar s) (TyApp op as)
+  TyApp<TyApp : ∀ {z} {op₁} {as₁} {op₂} {as₂} → ×-Lex _≡_ _op<_ (Lex-< _≡_ (_<_ {z})) (op₁ , Vec→List as₁) (op₂ , Vec→List as₂) → _<_ {↑ z} (TyApp op₁ as₁) (TyApp op₂ as₂)
 
 -- the ordering is transitive
--- but this definition fails the termination check
--- what's the best way to prove this? prove it (using WfRec or something)? or restructure the above?
-<-trans : Transitive _<_
+<-trans : {z : Size} → Transitive (_<_ {z})
 <-trans (TyVar<TyVar p) (TyVar<TyVar q) = TyVar<TyVar (S<-trans p q)
 <-trans (TyVar<TyVar _) TyVar<TyApp = TyVar<TyApp
 <-trans TyVar<TyApp (TyApp<TyApp _) = TyVar<TyApp
