@@ -36,9 +36,9 @@ record TypeOperator : Set where
   field name  : String
         arity : ℕ
 
-data Type : Set where
-  TyVar : String → Type
-  TyApp : (op : TypeOperator) → Vec Type (TypeOperator.arity op) → Type
+data Type : {z : Size} → Set where
+  TyVar : {z : Size} (s : String) → Type {↑ z}
+  TyApp : {z : Size} (op : TypeOperator) → (as : Vec (Type {z}) (TypeOperator.arity op)) → Type {↑ z}
 
 -- convert type operators to pairs enabling lexicographic comparison
 op→pair : TypeOperator →  String × ℕ
@@ -55,7 +55,7 @@ op<-trans = On.transitive op→pair (×-Lex _≡_ _S<_ _N<_) (×-transitive Prop
 -- can such a thing not be defined automatically?
 -- maybe should define the order on vectors separately?
 infix 4 _<_
-data _<_ : {_ : Size} → Rel Type Level.zero where
+data _<_ : {z : Size} → Rel (Type {z}) Level.zero where
   TyVar<TyVar : ∀ {z} {s₁} {s₂} → (s₁<s₂ : s₁ S< s₂) → _<_ {↑ z} (TyVar s₁) (TyVar s₂)
   TyVar<TyApp : ∀ {z} {s} {op} {as} → _<_ {↑ z} (TyVar s) (TyApp op as)
   TyApp<TyApp : ∀ {z} {op₁} {as₁} {op₂} {as₂} → ×-Lex _≡_ _op<_ (Lex-< _≡_ (_<_ {z})) (op₁ , Vec→List as₁) (op₂ , Vec→List as₂) → _<_ {↑ z} (TyApp op₁ as₁) (TyApp op₂ as₂)
@@ -94,13 +94,13 @@ foo3 t x y with t x y
 ... | tri≈ ¬a b ¬c = tri≈ ¬a (Pointwise.Rel≡⇒≡ b) ¬c
 ... | tri> ¬a ¬b c = tri> ¬a (¬b ∘ Pointwise.≡⇒Rel≡) c
 
-TyVar-inj : ∀ {x y} → ¬ (x ≡ y) → ¬ (TyVar x ≡ TyVar y)
+TyVar-inj : ∀ {z x y} → ¬ (x ≡ y) → ¬ (TyVar {z} x ≡ TyVar {z} y)
 TyVar-inj ne refl = ne refl
 
-TyVar-S< : ∀ {x y} → ¬ (x S< y) → ¬ (TyVar x < TyVar y)
+TyVar-S< : ∀ {z x y} → ¬ (x S< y) → ¬ (TyVar {z} x < TyVar {z} y)
 TyVar-S< gt (TyVar<TyVar s₁<s₂) = gt s₁<s₂
 
-TyApp-inj : ∀ {op₁ op₂ as₁ as₂} → ¬ (op₁ , Vec→List as₁ ≡ op₂ , Vec→List as₂) → ¬ (TyApp op₁ as₁ ≡ TyApp op₂ as₂)
+TyApp-inj : ∀ {z op₁ op₂ as₁ as₂} → ¬ (op₁ , Vec→List as₁ ≡ op₂ , Vec→List as₂) → ¬ (TyApp {z} op₁ as₁ ≡ TyApp {z} op₂ as₂)
 TyApp-inj ne refl = ne refl
 
 Vec→List-inj : ∀ {l} {A : Set l} {n} {v w : Vec A n} → Vec→List v ≡ Vec→List w → v ≡ w
@@ -108,22 +108,26 @@ Vec→List-inj {n = Data.Nat.zero} {[]} {[]} eq = refl
 Vec→List-inj {n = Data.Nat.suc n} {x ∷ xs} {y ∷ ys} eq with ∷-injective eq
 ... | x≡y , xs≡ys = cong₂ _ x≡y (Vec→List-inj xs≡ys)
 
-TyApp-inj' : ∀ {op₁ op₂ as₁ as₂} → (op₁ , Vec→List as₁ ≡ op₂ , Vec→List as₂) → (TyApp op₁ as₁ ≡ TyApp op₂ as₂)
+TyApp-inj' : ∀ {z op₁ op₂ as₁ as₂} → (op₁ , Vec→List as₁ ≡ op₂ , Vec→List as₂) → (TyApp {z} op₁ as₁ ≡ TyApp {z} op₂ as₂)
 TyApp-inj' eq with cong proj₁ eq
 TyApp-inj' eq | refl with cong proj₂ eq
 TyApp-inj' eq | refl | z with Vec→List-inj z
 TyApp-inj' eq | refl | _ | refl = refl
 
-TyApp-< : ∀ {op₁ op₂ as₁ as₂} → ¬ (×-Lex _≡_ _op<_ (Lex-< _≡_ _<_) (op₁ , Vec→List as₁) (op₂ , Vec→List as₂)) → ¬ (TyApp op₁ as₁ < TyApp op₂ as₂)
+TyApp-< : ∀ {z op₁ op₂ as₁ as₂} → ¬ (×-Lex _≡_ _op<_ (Lex-< _≡_ _<_) (op₁ , Vec→List as₁) (op₂ , Vec→List as₂)) → ¬ (TyApp {z} op₁ as₁ < TyApp {z} op₂ as₂)
 TyApp-< gt (TyApp<TyApp p) = gt p
 
+app : Size → Set
+app z = (TypeOperator × List (Type {z}))
+
+_app<_ : {z : Size} → Rel (app z) _
 _app<_ = ×-Lex _≡_ _op<_ (Lex-< _≡_ _<_)
 
 mutual
-  app<-cmp : Trichotomous _≡_ _app<_
+  app<-cmp : {z : Size} → Trichotomous {A = app z} _≡_ _app<_
   app<-cmp = foo (×-compare sym op<-cmp (foo3 (<-compare sym <-cmp)))
 
-  <-cmp : Trichotomous _≡_ _<_
+  <-cmp : {z : Size} → Trichotomous {A = Type {z}} _≡_ _<_
   <-cmp (TyVar s₁) (TyVar s₂) with S<-cmp s₁ s₂
   ... | tri< a ¬b ¬c = tri< (TyVar<TyVar a) (TyVar-inj ¬b) (TyVar-S<   ¬c)
   ... | tri≈ ¬a b ¬c = tri≈ (TyVar-S<   ¬a) (cong TyVar b) (TyVar-S<   ¬c)
