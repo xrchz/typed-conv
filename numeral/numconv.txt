@@ -1,0 +1,71 @@
+Numeral encodings
+  Norrish
+    Constants
+      bit1, bit2, zero
+
+  Binary
+    Constants
+      bit0, bit1, zero
+
+  Unary
+    Constants
+      suc, zero
+
+  Decimal
+
+  Named
+
+  zero : natural
+  suc  : natural -> natural
+  bit0 : natural -> natural
+  bit1 : natural -> natural
+  bit2 : natural -> natural
+  +    : natural -> natural -> natural
+
+  !n. + 0 n = n
+  !m n. + (suc m) n = suc (+ m n)
+  bit0 zero = zero
+  !n. bit0 (suc n) = suc (suc (bit0 n))
+  !n. bit1 n = suc (bit0 n)
+  !n. bit1 n = n + (n + suc zero)
+  !n. bit2 n = n + (n + (suc (suc zero)))
+
+  bit0 n = 2 * n
+  bit1 n = 2 * n + 1
+  bit2 n = 2 * n + 2
+
+(bit1 (bit1 (bit0 zero))) =
+(bit1 (bit1 0)) =
+(bit1 1) =
+3 (= 011)
+
+(bit0 (bit1 (bit1 zero))) =
+(bit0 (bit1 1)) =
+(bit0 3) =
+6 (= 110)
+
+Convert Norrish to Binary:
+n2b zero     = zero
+n2b (bit1 n) = bit1 (n2b n)
+n2b (bit2 n) = b+1 (bit1 (n2b n))
+b+1 zero     = bit1 zero
+b+1 (bit0 n) = bit1 n
+b+1 (bit1 n) = bit0 (b+1 n)
+
+As a conversion:
+n2b : n(n) -> n(n) = n(b)
+b+1 : n(b) -> suc n(b) = (1+n)(b)
+
+theorems we will use:
+  th1: !n. bit2 n = suc (bit1 n)
+  th2: suc zero = bit1 zero
+  th3: !n. suc (bit0 n) = bit1 n
+  th4: !n. suc (bit1 n) = bit0 (suc n)
+
+n2b zero     = refl zero
+n2b (bit1 n) = RAND_CONV n2b (bit1 n)
+n2b (bit2 n) = let th = n2b n in
+  TRANS (SUBS_OCCS [([?],th)] (SPEC n th1)) (b+1 (rhs th))
+b+1 zero     = th2
+b+1 (bit0 n) = SPEC n th3
+b+1 (bit1 n) = SUBS_OCCS [([?],b+1 n)] (SPEC n th4)
