@@ -20,8 +20,9 @@ rator (AppTerm (AppTerm f _) _) = f
 lhs (AppTerm (AppTerm _ l) _) = l
 rand (AppTerm _ r) = r
 rhs = rand
-alpha = VarType ([],"A")
 truth = ConstTerm (boolns,"T") bool
+alpha_nm = ([],"A")
+alpha = VarType alpha_nm
 boolns = ["Data","Bool"]
 numns = ["Number","Natural"]
 fn x y = OpType ([],"->") [x, y]
@@ -48,11 +49,21 @@ data Proof =
   | EqMp Proof Proof
   | Axiom Term
   | BetaConv Term
+  | InstA Type Proof
   deriving Show
 subst v t tm@(VarTerm v') = if v == v' then t else tm
 subst _ _ tm@(ConstTerm _ _) = tm
 subst v t (AppTerm t1 t2) = AppTerm (subst v t t1) (subst v t t2)
 subst v t tm@(AbsTerm v' b) = if v == v' then tm else AbsTerm v' (subst v t b)
+tyinstA t v@(VarType _) = if v == alpha then t else v
+tyinstA t (OpType op args) = (OpType op (map (tyinstA t) args))
+tminstA t tm = f tm
+  where
+    f (VarTerm (v,ty)) = VarTerm (v, g ty)
+    f (ConstTerm c ty) = ConstTerm c (g ty)
+    f (AppTerm t1 t2) = AppTerm (f t1) (f t2)
+    f (AbsTerm (v,ty) tm) = AbsTerm (v, g ty) (f tm)
+    g = tyinstA t
 concl (Refl t) = eq (tyof t) t t
 concl (AppThm th1 th2) = eq ty (AppTerm f1 x1) (AppTerm f2 x2)
   where (AppTerm (AppTerm _ f1) f2) = concl th1
@@ -61,6 +72,7 @@ concl (AppThm th1 th2) = eq ty (AppTerm f1 x1) (AppTerm f2 x2)
 concl (EqMp th1 th2) = rhs (concl th1)
 concl (Axiom t) = t
 concl (BetaConv (AppTerm (AbsTerm v tm) t)) = subst v t tm
+concl (InstA ty th) = tminstA ty (concl th)
 trans th1 th2 = EqMp (AppThm (Refl t) th2) th1
   where t = rator (concl th1)
 sym th = EqMp lel_rel lel
@@ -78,10 +90,10 @@ spec tm th = EqMp (sym pv_T) (Axiom truth)
     lxTv_T = BetaConv lxTv
     AppTerm (AppTerm _ lxPxv) lxTv = concl lxPxv_lxTv
     lxPxv_lxTv = AppThm lxPx_lxT (Refl v)
-    lxPx_lxT = BetaConv lPP_lxTlxPx
+    lxPx_lxT = EqMp (BetaConv (concl lPP_lxTlxPx)) lPP_lxTlxPx
     lPP_lxTlxPx = EqMp (AppThm fa_lPP_lxT (Refl lxPx)) fa_lxPx
     lxPx = rand (concl th)
-    fa_lPP_lxT = forall_def ty
+    fa_lPP_lxT = InstA ty forall_def
     fa_lxPx = th
     ty = tyof v
     v = tm
@@ -147,3 +159,7 @@ log_proof (AppThm th1 th2) = do
 log_proof (BetaConv tm) = do
   log_term tm
   log_command "betaConv"
+log_proof (InstA ty th) = do
+  log_subst ([(alpha_nm,ty)],[])
+  log_proof th
+  log_command "subst"
