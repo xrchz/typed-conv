@@ -26,6 +26,7 @@ data Proof =
   | AppThm Proof Proof
   | EqMp Proof Proof
   | Axiom Term
+  | BetaConv Term
   deriving Show
 concl (Refl t) = eq (tyof t) t t
 concl (Spec t th) = subst v t tm
@@ -36,6 +37,7 @@ concl (AppThm th1 th2) = eq ty (AppTerm f1 x1) (AppTerm f2 x2)
         (OpType _ [_,ty]) = tyof f1
 concl (EqMp th1 th2) = rhs (concl th1)
 concl (Axiom t) = t
+concl (BetaConv (AppTerm (AbsTerm v tm) t)) = subst v t tm
 trans th1 th2 = EqMp (AppThm (Refl t) th2) th1
   where t = rator (concl th1)
 boolns = ["Data","Bool"]
@@ -100,9 +102,21 @@ n2b (NBit2 n) = trans (subs [R,R,R] (n2b n) (Spec (n2t n) th1)) (binc nb)
 -- import Control.Monad.State
 truth = ConstTerm ((boolns,"T"),bool)
 alpha = VarType ([],"A")
-p = (([],"P"),fn alpha bool)
-forall_def = Axiom (eq (fn (fn alpha bool) bool) (forall_tm alpha) (AbsTerm p (eq (fn alpha bool) (VarTerm p) (AbsTerm (([],"x"),alpha) truth))))
-{-
+p ty = (([],"P"),fn ty bool)
+lxT ty = AbsTerm (([],"x"),ty) truth
+forall_def_tm ty = AbsTerm (p ty) (eq (fn ty bool) (VarTerm (p ty)) (lxT ty))
+forall_def = Axiom (eq (fn (fn alpha bool) bool) (forall_tm alpha) (forall_def_tm alpha))
+log_alpha_subst ty = do
+  --[[alpha,ty],[]]
+  log_nil
+  log_nil
+  log_cons
+  log_nil
+  log_type ty
+  log_cons
+  log_type alpha
+  log_cons
+  log_cons
 log_proof (Refl tm) = do
   log_term tm
   log_command "refl"
@@ -117,28 +131,52 @@ log_proof (AppThm th1 th2) = do
   log_proof th1
   log_proof th2
   log_command "appThm"
+log_proof (BetaConv tm) = do
+  log_term tm
+  log_command "betaConv"
 log_proof (Spec tm th) = do
-  log_proof th
-  c <- rand (concl th)
+  c@(AbsTerm (_,ty) _) <- rand (concl th) -- c = \x. P x
+  log_proof (Refl tm)
+  -- |- v = v
+  log_proof (BetaConv (AppTerm (forall_def_tm ty) c))
+  -- |- (\P. P = \x. T) (\x. P x) = ((\x. P x) = \x. T)
+  -- |- v = v
+  log_alpha_subst ty
+  log_command "subst"
+  log_proof forall_def
+  -- |- (!) = \P. P = \x. T
+  -- |- (\P. P = \x. T) (\x. P x) = ((\x. P x) = \x. T)
+  -- |- v = v
   log_proof (Refl c)
+  -- |- (\x. P x) = (\x. P x) 
+  -- |- (!) = \P. P = \x. T
+  -- |- (\P. P = \x. T) (\x. P x) = ((\x. P x) = \x. T)
+  -- |- v = v
   log_command "appThm"
-
-  want P v
-  have |- (!) (\x. P x)            (th)
-  have |- (!) = \P. P = \x. T      (!-def)
-  have |- T
-  appThm to get
-  |- (\P. P = \x. T) (\x. P x)
-  betaConv to get
-  |- (\P. P = \x. T) (\x. P x) = ((\x. P x) = \x. T)
-  eqMp to get
-  |- (\x. P x) = \x. T
-  appThm to get
-  |- (\x. P x) v = (\x. T) v
-  betaConv to get
-  |- (\x. P x) v = P v
-  betaConv to get
-  |- (\x. T) v = T
+  -- |- (!) (\x. P x) = (\P. P = \x. T) (\x. P x)
+  -- |- (\P. P = \x. T) (\x. P x) = ((\x. P x) = \x. T)
+  -- |- v = v
+  log_proof th
+  -- |- (!) (\x. P x)
+  -- |- (!) (\x. P x) = (\P. P = \x. T) (\x. P x)
+  -- |- (\P. P = \x. T) (\x. P x) = ((\x. P x) = \x. T)
+  -- |- v = v
+  log_command "eqMp"
+  -- |- (\P. P = \x. T) (\x. P x)
+  -- |- (\P. P = \x. T) (\x. P x) = ((\x. P x) = \x. T)
+  -- |- v = v
+  log_command "eqMp"
+  -- |- (\x. P x) = \x. T
+  -- |- v = v
+  log_command "appThm"
+  -- |- (\x. P x) v = (\x. T) v
+  log_proof (BetaConv (AppTerm c tm))
+  -- |- (\x. P x) v = P v
+  -- |- (\x. P x) v = (\x. T) v
+  log_proof (BetaConv (AppTerm (lxT ty) tm))
+  -- |- (\x. T) v = T
+  -- |- (\x. P x) v = P v
+  -- |- (\x. P x) v = (\x. T) v
   appThm to get
   |- P v = T
   refl to get
@@ -151,4 +189,3 @@ log_proof (Spec tm th) = do
   |- T = P v
   eqMp to get
   |- P v
--}
