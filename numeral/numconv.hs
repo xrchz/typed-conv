@@ -142,6 +142,72 @@ n2b (NBit2 n) = trans (subs [R,R,R] (n2b n) (spec (n2t n) th1)) (binc nb)
 -- import Data.Map (Map)
 -- import qualified Data.Map as Map
 -- import Control.Monad.State
+log_raw = putStr
+log_command s = do
+  log_raw s
+  log_raw "\n"
+log_name (ns,n) = do
+  log_raw "\""
+  log_namespace ns
+  log_component n
+  log_raw "\"\n"
+    where
+      log_namespace [] = return ()
+      log_namespace (c:ns) = do
+        log_component c
+        log_raw "."
+        log_namespace ns
+      log_component [] = return ()
+      log_component (x:xs) = do
+        if elem x ".\"\\" then log_raw "\\" else return ()
+        log_raw [x]
+        log_component xs
+log_list log [] = log_command "nil"
+log_list log (x:xs) = do
+  log x
+  log_list log xs
+  log_command "cons"
+log_typeop n = do
+  log_name n
+  log_command "typeOp"
+log_type (OpType op args) = do
+  log_typeop op
+  log_list log_type args
+  log_command "opType"
+log_type (VarType n) = do
+  log_name n
+  log_command "varType"
+log_const n = do
+  log_name n
+  log_command "const"
+log_var (n,ty) = do
+  log_name n
+  log_type ty
+  log_command "var"
+log_term (AbsTerm v b) = do
+  log_var v
+  log_term b
+  log_command "absTerm"
+log_term (AppTerm f x) = do
+  log_term f
+  log_term x
+  log_command "appTerm"
+log_term (ConstTerm c ty) = do
+  log_const c
+  log_type ty
+  log_command "constTerm"
+log_term (VarTerm v) = do
+  log_var v
+  log_command "varTerm"
+log_pair loga logb (a,b) = do
+  loga a
+  logb b
+  log_command "nil"
+  log_command "cons"
+  log_command "cons"
+log_subst =
+  log_pair (log_list (log_pair log_name log_type))
+           (log_list (log_pair log_var log_term))
 log_proof (Refl tm) = do
   log_term tm
   log_command "refl"
