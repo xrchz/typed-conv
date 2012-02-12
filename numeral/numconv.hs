@@ -5,32 +5,32 @@ data Type =
   | VarType Name
   deriving (Eq, Show)
 type Var = (Name, Type)
-type Const = (Name, Type)
+type Const = Name
 data Term =
     AbsTerm Var Term
   | AppTerm Term Term
-  | ConstTerm Const
+  | ConstTerm Const Type
   | VarTerm Var
   deriving (Eq, Show)
 tyof (VarTerm (_,ty)) = ty
-tyof (ConstTerm (_,ty)) = ty
+tyof (ConstTerm _ ty) = ty
 tyof (AppTerm f x) = fn (tyof f) (tyof x)
 tyof (AbsTerm (_,x) t) = fn x (tyof t)
 rator (AppTerm (AppTerm f _) _) = f
 lhs (AppTerm (AppTerm _ l) _) = l
 rand (AppTerm _ r) = r
 rhs = rand
-truth = ConstTerm ((boolns,"T"),bool)
 alpha = VarType ([],"A")
+truth = ConstTerm (boolns,"T") bool
 boolns = ["Data","Bool"]
 numns = ["Number","Natural"]
 fn x y = OpType ([],"->") [x, y]
 bool = OpType (boolns,"bool") []
 num = OpType (numns,"natural") []
-eq_tm ty = ConstTerm (([],"="), fn ty (fn ty bool))
+eq_tm ty = ConstTerm ([],"=") (fn ty (fn ty bool))
 eq ty l r = AppTerm (AppTerm (eq_tm ty) l) r
 eqn = eq num
-forall_tm ty = (ConstTerm ((boolns,"!"), fn (fn ty bool) bool))
+forall_tm ty = ConstTerm (boolns,"!") (fn (fn ty bool) bool)
 forall v@(_,ty) bod = AppTerm (forall_tm ty) (AbsTerm v bod)
 forall_def = Axiom
   (eq (fn (fn alpha bool) bool)
@@ -50,7 +50,7 @@ data Proof =
   | BetaConv Term
   deriving Show
 subst v t tm@(VarTerm v') = if v == v' then t else tm
-subst _ _ tm@(ConstTerm _) = tm
+subst _ _ tm@(ConstTerm _ _) = tm
 subst v t (AppTerm t1 t2) = AppTerm (subst v t t1) (subst v t t2)
 subst v t tm@(AbsTerm v' b) = if v == v' then tm else AbsTerm v' (subst v t b)
 concl (Refl t) = eq (tyof t) t t
@@ -85,14 +85,14 @@ spec tm th = EqMp (sym pv_T) (Axiom truth)
     fa_lxPx = th
     ty = tyof v
     v = tm
-bit_tm s = ConstTerm ((numns,"bit"++s), fn num num)
+bit_tm s = ConstTerm (numns,"bit"++s) (fn num num)
 bit0_tm = bit_tm "0"
 bit1_tm = bit_tm "1"
 bit0 = AppTerm bit0_tm
 bit1 = AppTerm bit1_tm
 bit2 = AppTerm (bit_tm "2")
-zero = ConstTerm ((numns,"zero"),num)
-suc = AppTerm (ConstTerm ((numns,"suc"), fn num num))
+zero = ConstTerm (numns,"zero") num
+suc = AppTerm (ConstTerm (numns,"suc") (fn num num))
 nv = (([],"n"),num)
 n = VarTerm nv
 th1 = Axiom (forall nv (eqn (bit2 n) (suc (bit1 n))))
