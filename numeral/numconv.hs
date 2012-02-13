@@ -14,7 +14,8 @@ data Term =
   deriving (Eq, Show)
 tyof (VarTerm (_,ty)) = ty
 tyof (ConstTerm _ ty) = ty
-tyof (AppTerm f x) = fn (tyof f) (tyof x)
+tyof (AppTerm f _) = r
+  where OpType _ [_, r] = tyof f
 tyof (AbsTerm (_,x) t) = fn x (tyof t)
 rator (AppTerm (AppTerm f _) _) = f
 lhs (AppTerm (AppTerm _ l) _) = l
