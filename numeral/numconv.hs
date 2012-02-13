@@ -1,11 +1,13 @@
 import Control.Monad.State (get, put, StateT, liftIO, evalStateT)
 import System.IO (hPutStr, Handle, withFile, IOMode (WriteMode))
+import Data.Map (Map)
+import qualified Data.Map as Map (empty, size, insert, lookup)
 type Name = ([String], String)
 type TypeOp = Name
 data Type =
     OpType TypeOp [Type]
   | VarType Name
-  deriving (Eq, Show)
+  deriving (Eq, Ord)
 type Var = (Name, Type)
 type Const = Name
 data Term =
@@ -13,7 +15,7 @@ data Term =
   | AppTerm Term Term
   | ConstTerm Const Type
   | VarTerm Var
-  deriving (Eq, Show)
+  deriving (Eq, Ord)
 tyof (VarTerm (_,ty)) = ty
 tyof (ConstTerm _ ty) = ty
 tyof (AppTerm f _) = r
@@ -53,7 +55,6 @@ data Proof =
   | Axiom Term
   | BetaConv Term
   | InstA Type Proof
-  deriving Show
 subst v t tm@(VarTerm v') = if v == v' then t else tm
 subst _ _ tm@(ConstTerm _ _) = tm
 subst v t (AppTerm t1 t2) = AppTerm (subst v t t1) (subst v t t2)
@@ -142,29 +143,63 @@ n2b NZero = Refl zero
 n2b (NBit1 n) = AppThm (Refl bit1_tm) (n2b n)
 n2b (NBit2 n) = trans (subs [R,R,R] (n2b n) (spec (n2t n) th1)) (binc nb)
   where nb = t2b (rhs (concl (n2b n)))
-log_raw :: String -> StateT Handle IO ()
+data Object =
+    OTerm Term
+  | OType Type
+  | OPair (Object, Object)
+  | OList [Object]
+  | OName Name
+  | OConst Const
+  | OVar Var
+  | OTypeOp TypeOp
+  | OThm Term
+  deriving (Eq, Ord)
+setMap m' = do
+  (h,m) <- get
+  put (h,m')
+getMap :: StateT (Handle,Map Object Int) IO (Map Object Int)
+getMap = do
+  (_,m) <- get
+  return m
+getHandle = do
+  (h,_) <- get
+  return h
 log_raw s = do
-  h <- get
+  h <- getHandle
   liftIO $ hPutStr h s
 log_command s = do
   log_raw s
   log_raw "\n"
-log_name (ns,n) = do
-  log_raw "\""
-  log_namespace ns
-  log_component n
-  log_raw "\"\n"
-    where
-      log_namespace [] = return ()
-      log_namespace (c:ns) = do
-        log_component c
-        log_raw "."
-        log_namespace ns
-      log_component [] = return ()
-      log_component (x:xs) = do
-        if elem x ".\"\\" then log_raw "\\" else return ()
-        log_raw [x]
-        log_component xs
+log_num = log_command . show
+hashcons ob comp = do
+  m <- getMap
+  case Map.lookup ob m of
+    Just k -> do
+      log_num k
+      log_command "ref"
+    Nothing -> do
+      comp
+      m <- getMap
+      let k = Map.size m
+      log_num k
+      log_command "def"
+      setMap (Map.insert ob k m)
+log_name n@(ns,c) = hashcons (OName n) (
+  do log_raw "\""
+     log_namespace ns
+     log_component c
+     log_raw "\"\n" )
+  where
+    log_namespace [] = return ()
+    log_namespace (c:ns) = do
+      log_component c
+      log_raw "."
+      log_namespace ns
+    log_component [] = return ()
+    log_component (x:xs) = do
+      if elem x ".\"\\" then log_raw "\\" else return ()
+      log_raw [x]
+      log_component xs
 log_list log [] = log_command "nil"
 log_list log (x:xs) = do
   log x
@@ -238,4 +273,4 @@ log_thm th = do
   log_term (concl th)
   log_command "thm"
 log_thm_to f th = withFile f WriteMode (\ h ->
-  evalStateT (log_thm th) h)
+  evalStateT (log_thm th) (h, Map.empty))
