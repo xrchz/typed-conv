@@ -1,3 +1,5 @@
+import Control.Monad.State (get, put, StateT, liftIO, evalStateT)
+import System.IO (hPutStr, Handle, withFile, IOMode (WriteMode))
 type Name = ([String], String)
 type TypeOp = Name
 data Type =
@@ -140,10 +142,10 @@ n2b NZero = Refl zero
 n2b (NBit1 n) = AppThm (Refl bit1_tm) (n2b n)
 n2b (NBit2 n) = trans (subs [R,R,R] (n2b n) (spec (n2t n) th1)) (binc nb)
   where nb = t2b (rhs (concl (n2b n)))
--- import Data.Map (Map)
--- import qualified Data.Map as Map
--- import Control.Monad.State
-log_raw = putStr
+log_raw :: String -> StateT Handle IO ()
+log_raw s = do
+  h <- get
+  liftIO $ hPutStr h s
 log_command s = do
   log_raw s
   log_raw "\n"
@@ -230,3 +232,10 @@ log_proof (InstA ty th) = do
   log_subst ([(alpha_nm,ty)],[])
   log_proof th
   log_command "subst"
+log_thm th = do
+  log_proof th
+  log_list log_term []
+  log_term (concl th)
+  log_command "thm"
+log_thm_to f th = withFile f WriteMode (\ h ->
+  evalStateT (log_thm th) h)
