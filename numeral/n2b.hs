@@ -250,8 +250,8 @@ eq_tm ty = ConstTerm (Const (minns "=")) (fn ty (fn ty bool))
 eq ty l r = AppTerm (AppTerm (eq_tm ty) l) r
 eqn = eq num
 
-rator (AppTerm (AppTerm f _) _) = f
-rand (AppTerm _ r) = r
+rator (AppTerm f _) = f
+rand (AppTerm _ x) = x
 rhs = rand
 
 forall_tm ty = ConstTerm (Const (boolns "!")) (fn (fn ty bool) bool)
