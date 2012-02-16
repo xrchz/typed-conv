@@ -3,32 +3,67 @@ import Data.Map (Map)
 import qualified Data.List as List
 import qualified Data.Map as Map (empty,insert,lookup,size)
 import Control.Monad (liftM)
-import Control.Monad.State (StateT,get,put,liftIO,evalStateT)
+import Control.Monad.State (StateT,get,put,liftIO,evalStateT,evalState)
 import System.IO (Handle,withFile,IOMode(WriteMode),hPutStr,hPutStrLn)
 import Prelude hiding (log,map)
+
+logNamespace lr = ln where
+  ln [] = return ()
+  ln (c:ns) = do
+    lc c
+    lr "."
+    ln ns
+  lc = logComponent logRaw
+logComponent lr = lc where
+  lc [] = return ()
+  lc (x:xs) = do
+    if elem x ".\"\\" then lr "\\" else return ()
+    lr [x]
+    lc xs
 
 type Component = String
 type Namespace = [Component]
 newtype Name = Name (Namespace, Component)
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord)
+instance Show Name where
+  show (Name (ns,n)) = evalState c "" where
+    c = (logComponent l n) >> get
+    l s2 = get >>= (\s1 -> put (s1 ++ s2))
 
 newtype TypeOp = TypeOp Name
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord)
+instance Show TypeOp where
+  show (TypeOp n) = show n
 data Type =
     OpType TypeOp [Type]
   | VarType Name
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord)
+instance Show Type where
+  show (VarType n) = show n
+  show (OpType (TypeOp (Name ([],"->"))) [x,y]) = "("++(show x)++"->"++(show y)++")"
+  show (OpType op args) = (List.intercalate " " (List.map show args))++(show op)
 
 newtype Var = Var (Name, Type)
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord)
+instance Show Var where
+  show (Var(n,ty)) = "("++(show n)++":"++(show ty)++")"
 newtype Const = Const Name
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord)
+instance Show Const where
+  show (Const n) = show n
+
 data Term =
     AbsTerm Var Term
   | AppTerm Term Term
   | ConstTerm Const Type
   | VarTerm Var
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord)
+instance Show Term where
+  show (AbsTerm v b) = "(\\"++(show v)++". "++(show b)++")"
+  show (AppTerm (AppTerm (ConstTerm (Const (Name([],"="))) _) l) r) = "("++(show l)++" = "++(show r)++")"
+  show (AppTerm t1 t2) = "("++(show t1)++" "++(show t2)++")"
+  show (ConstTerm c ty) = show c -- "("++(show c)++":"++(show ty)++")"
+  show (VarTerm v) = show v
 
 data Object =
     OTerm Term
@@ -61,25 +96,14 @@ logRawLn s = getHandle >>= liftIO . flip hPutStrLn s
 
 logCommand = logRawLn
 
-logNamespace [] = return ()
-logNamespace (c:ns) = do
-  logComponent c
-  logRaw "."
-  logNamespace ns
-logComponent [] = return ()
-logComponent (x:xs) = do
-  if elem x ".\"\\" then logRaw "\\" else return ()
-  logRaw [x]
-  logComponent xs
-
 logNum = logCommand . (show :: Int -> String)
 
 instance Loggable Name where
   key = OName
   log (Name (ns,n)) = do
     logRaw "\""
-    logNamespace ns
-    logComponent n
+    logNamespace logRaw ns
+    logComponent logRaw n
     logRawLn "\""
 
 hc :: Loggable a => (a -> M ()) -> a -> M ()
@@ -290,11 +314,11 @@ forall_def = Axiom
 spec tm th = EqMp (sym pv_T) (Axiom truth)
   where
     pv_T = trans pv_lxPxv (trans lxPxv_lxTv lxTv_T)
-    pv_lxPxv = sym (BetaConv lxPxv)
-    lxTv_T = BetaConv lxTv
+    pv_lxPxv = sym (BetaConv lxPxv) -- P[v] = (\x. P[x]) v
+    lxTv_T = BetaConv lxTv -- (\x. T) v = T
     AppTerm (AppTerm _ lxPxv) lxTv = concl lxPxv_lxTv
-    lxPxv_lxTv = AppThm lxPx_lxT (Refl v)
-    lxPx_lxT = EqMp bc lPP_lxTlxPx    -- (\x. P x) = (\x. T)
+    lxPxv_lxTv = AppThm lxPx_lxT (Refl v) -- (\x. P[x]) v = (\x. T) v
+    lxPx_lxT = EqMp bc lPP_lxTlxPx    -- (\x. P[x]) = (\x. T)
     bc = BetaConv (concl lPP_lxTlxPx) -- (\P. P = (\x. T)) (\x. P[x]) = (\x. P[x]) = (\x. T)
     lPP_lxTlxPx = EqMp faxPx_ fa_lxPx -- (\P. P = (\x. T)) (\x. P[x])
     faxPx_ = (AppThm fa_lPP_lxT (Refl lxPx)) -- (!x. P[x]) = (\P. P = (\x. T)) (\x. P[x])
