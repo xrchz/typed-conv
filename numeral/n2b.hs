@@ -10,25 +10,25 @@ import Prelude hiding (log,map)
 type Component = String
 type Namespace = [Component]
 newtype Name = Name (Namespace, Component)
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Show)
 
 newtype TypeOp = TypeOp Name
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Show)
 data Type =
     OpType TypeOp [Type]
   | VarType Name
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Show)
 
 newtype Var = Var (Name, Type)
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Show)
 newtype Const = Const Name
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Show)
 data Term =
     AbsTerm Var Term
   | AppTerm Term Term
   | ConstTerm Const Type
   | VarTerm Var
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Show)
 
 data Object =
     OTerm Term
@@ -214,7 +214,7 @@ concl (AppThm th1 th2) = eq ty (AppTerm f1 x1) (AppTerm f2 x2)
         (OpType _ [_,ty]) = tyof f1
 concl (EqMp th1 th2) = rhs (concl th1)
 concl (Axiom t) = t
-concl (BetaConv (AppTerm (AbsTerm v tm) t)) = subst v t tm
+concl (BetaConv tm@(AppTerm (AbsTerm v b) t)) = eq (tyof tm) tm (subst v t b)
 concl (InstA ty th) = tminstA ty (concl th)
 
 subst v t tm@(VarTerm v') = if v == v' then t else tm
@@ -294,11 +294,13 @@ spec tm th = EqMp (sym pv_T) (Axiom truth)
     lxTv_T = BetaConv lxTv
     AppTerm (AppTerm _ lxPxv) lxTv = concl lxPxv_lxTv
     lxPxv_lxTv = AppThm lxPx_lxT (Refl v)
-    lxPx_lxT = EqMp (BetaConv (concl lPP_lxTlxPx)) lPP_lxTlxPx
-    lPP_lxTlxPx = EqMp (AppThm fa_lPP_lxT (Refl lxPx)) fa_lxPx
-    lxPx = rand (concl th)
-    fa_lPP_lxT = InstA ty forall_def
-    fa_lxPx = th
+    lxPx_lxT = EqMp bc lPP_lxTlxPx    -- (\x. P x) = (\x. T)
+    bc = BetaConv (concl lPP_lxTlxPx) -- (\P. P = (\x. T)) (\x. P[x]) = (\x. P[x]) = (\x. T)
+    lPP_lxTlxPx = EqMp faxPx_ fa_lxPx -- (\P. P = (\x. T)) (\x. P[x])
+    faxPx_ = (AppThm fa_lPP_lxT (Refl lxPx)) -- (!x. P[x]) = (\P. P = (\x. T)) (\x. P[x])
+    lxPx = rand (concl th)            -- (\x. P[x])
+    fa_lPP_lxT = InstA ty forall_def  -- (!) = (\P. P = (\x. T))
+    fa_lxPx = th                      -- !x. P[x]
     ty = tyof v
     v = tm
 
