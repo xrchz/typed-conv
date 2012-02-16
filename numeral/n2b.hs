@@ -270,11 +270,10 @@ trans th1 th2 = EqMp (AppThm (Refl t) th2) th1
 
 sym th = EqMp lel_rel lel
   where
+    lel_rel = AppThm le_re lel
     lel = Refl l
-    lel_rel = AppThm ler el_el
-    el_el = Refl (AppTerm (eq_tm ty) l)
-    ty = tyof l
-    AppTerm (AppTerm _ l) r = concl th
+    le_re = AppThm (Refl e) ler
+    AppTerm (AppTerm e l) r = concl th
     ler = th
 
 forall_def = Axiom
