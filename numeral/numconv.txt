@@ -65,7 +65,7 @@ theorems we will use:
 n2b zero     = refl zero
 n2b (bit1 n) = RAND_CONV n2b (bit1 n)
 n2b (bit2 n) = let th = n2b n in
-  TRANS (SUBS_OCCS [([?],th)] (SPEC n th1)) (b+1 (rhs th))
+  TRANS (SUBS_OCCS [([?],th)] (SPEC n th1)) (b+1 (bit1 (rhs th)))
 b+1 zero     = th2
 b+1 (bit0 n) = SPEC n th3
 b+1 (bit1 n) = SUBS_OCCS [([?],b+1 n)] (SPEC n th4)

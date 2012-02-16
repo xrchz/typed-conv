@@ -375,7 +375,7 @@ binc (BBit1 n) = subs 1 (binc n) (spec (b2t n) th4)
 
 n2b NZero = Refl zero
 n2b (NBit1 n) = AppThm (Refl bit1_tm) (n2b n)
-n2b (NBit2 n) = trans (subs 2 (n2b n) (spec (n2t n) th1)) (binc nb)
+n2b (NBit2 n) = trans (subs 2 (n2b n) (spec (n2t n) th1)) (binc (BBit1 nb))
   where nb = t2b (rhs (concl (n2b n)))
 
 run h n = withFile h WriteMode f where
