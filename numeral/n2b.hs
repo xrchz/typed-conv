@@ -183,6 +183,7 @@ instance Loggable Proof where
       log tm
       logCommand "refl"
     l (Axiom tm) = do
+      log ([]::[Term])
       log tm
       logCommand "axiom"
     l (EqMp th1 th2) = do
