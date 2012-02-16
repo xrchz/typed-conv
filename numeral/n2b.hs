@@ -1,16 +1,21 @@
 import Data.Set (Set)
 import Data.Map (Map)
+import qualified Data.Map as Map (insert,lookup,size)
+import Control.Monad.State (StateT,get,put,liftIO)
 import Prelude hiding (log)
+
 type Component = String
 type Namespace = [Component]
 newtype Name = Name (Namespace, Component)
   deriving (Eq, Ord)
+
 newtype TypeOp = TypeOp Name
   deriving (Eq, Ord)
 data Type =
     OpType TypeOp [Type]
   | VarType Name
   deriving (Eq, Ord)
+
 newtype Var = Var (Name, Type)
   deriving (Eq, Ord)
 newtype Const = Const Name
@@ -21,21 +26,7 @@ data Term =
   | ConstTerm Const Type
   | VarTerm Var
   deriving (Eq, Ord)
-tyof (VarTerm (Var (_,ty))) = ty
-tyof (ConstTerm _ ty) = ty
-tyof (AppTerm f _) = r
-  where OpType _ [_, r] = tyof f
-tyof (AbsTerm (Var (_,x)) t) = fn x (tyof t)
-minns s = Name ([], s)
-boolns s = Name (["Data","Bool"], s)
-fn x y = OpType (TypeOp (minns "->")) [x, y]
-alpha_nm = Name ([],"A")
-alpha = VarType alpha_nm
-bool = OpType (TypeOp (boolns "bool")) []
-eq_tm ty = ConstTerm (Const (minns "=")) (fn ty (fn ty bool))
-eq ty l r = AppTerm (AppTerm (eq_tm ty) l) r
-rand (AppTerm _ r) = r
-rhs = rand
+
 data Object =
     OTerm Term
   | OType Type
@@ -47,9 +38,12 @@ data Object =
   | OTypeOp TypeOp
   | OThm Term
   deriving (Eq, Ord)
+
 logRaw = putStr
 logRawLn = putStrLn
+
 logCommand = logRawLn
+
 logNamespace [] = return ()
 logNamespace (c:ns) = do
   logComponent c
@@ -60,9 +54,98 @@ logComponent (x:xs) = do
   if elem x ".\"\\" then logRaw "\\" else return ()
   logRaw [x]
   logComponent xs
+
+type M a = StateT (Map Object Int) IO a
+
 class Loggable a where
   key :: a -> Object
-  log :: a -> IO ()
+  log :: a -> M ()
+
+getMap = get
+putMap = put
+
+hc :: Loggable a => a -> M a
+hc a = do
+  m <- getMap
+  case Map.lookup (key a) m of
+    Just k -> do
+      liftIO $ logNum k
+      liftIO $ logCommand "ref"
+    Nothing -> do
+      log a
+      m <- getMap
+      let k = Map.size m
+      liftIO $ logNum k
+      liftIO $ logCommand "def"
+      putMap (Map.insert (key a) k m)
+  return a
+
+mkns ns s = hc $ Name (ns, s)
+minns  = mkns []
+boolns = mkns ["Data","Bool"]
+numns  = mkns ["Number","Natural"]
+
+mTypeOp mn = do
+  n <- mn
+  hc $ TypeOp n
+
+mOpType mop margs = do
+  op <- mop
+  args <- margs
+  hc $ OpType op args
+
+mVarType mn = do
+  n <- mn
+  hc $ VarType n
+
+mConst mn = do
+  n <- mn
+  hc $ Const n
+
+mConstTerm mc mty = do
+  c <- mc
+  ty <- mty
+  hc $ ConstTerm c ty
+
+mAppTerm mf mx = do
+  f <- mf
+  x <- mx
+  hc $ AppTerm f x
+
+mAbsTerm mx mb = do
+  x <- mx
+  b <- mb
+  hc $ AbsTerm x b
+
+fn mx my = do
+  x <- mx
+  y <- my
+  mOpType (mTypeOp (minns "->")) (hc [x, y])
+
+bool = mOpType (mTypeOp (boolns "bool")) (hc [])
+num = mOpType (mTypeOp (numns "natural")) (hc [])
+alpha_nm = hc $ Name ([],"A")
+alpha = mVarType alpha_nm
+eq_tm ty = mConstTerm (mConst (minns "=")) (fn ty (fn ty bool))
+eq ty l r = mAppTerm (mAppTerm (eq_tm ty) l) r
+eqn = eq num
+rator (AppTerm (AppTerm f _) _) = f
+rand (AppTerm _ r) = r
+rhs = rand
+forall_tm ty = mConstTerm (mConst (boolns "!")) (fn (fn ty bool) bool)
+
+tyof (VarTerm (Var (_,ty))) = ty
+tyof (ConstTerm _ ty) = ty
+tyof (AppTerm f _) = r
+  where OpType _ [_, r] = tyof f
+tyof (AbsTerm (Var (_,x)) t) = fn x (tyof t)
+
+forall mv mb = do
+  v@(Var (_,ty)) <- mv
+  bod <- mb
+  mAppTerm (forall_tm (hc ty)) (mAbsTerm (hc v) bod)
+truth = mConstTerm (mConst (boolns "T")) bool
+
 instance Loggable Name where
   key = OName
   log (Name (ns,n)) = do
@@ -144,6 +227,40 @@ concl (EqMp th1 th2) = rhs (concl th1)
 concl (Axiom t) = t
 concl (BetaConv (AppTerm (AbsTerm v tm) t)) = subst v t tm
 concl (InstA ty th) = tminstA ty (concl th)
+trans th1 th2 = EqMp (AppThm (Refl t) th2) th1
+  where t = rator (concl th1)
+sym th = EqMp lel_rel lel
+  where
+    lel = Refl l
+    lel_rel = AppThm ler el_el
+    el_el = Refl (AppTerm (eq_tm ty) l)
+    ty = tyof l
+    AppTerm (AppTerm _ l) r = concl th
+    ler = th
+forall_def = Axiom
+  (eq (fn (fn alpha bool) bool)
+    (forall_tm alpha)
+    (AbsTerm p
+      (eq (fn alpha bool)
+        (VarTerm p)
+        (AbsTerm x truth))))
+  where
+    x = Var (Name ([],"x"),alpha)
+    p = Var (Name ([],"P"),fn alpha bool)
+spec tm th = EqMp (sym pv_T) (Axiom truth)
+  where
+    pv_T = trans pv_lxPxv (trans lxPxv_lxTv lxTv_T)
+    pv_lxPxv = sym (BetaConv lxPxv)
+    lxTv_T = BetaConv lxTv
+    AppTerm (AppTerm _ lxPxv) lxTv = concl lxPxv_lxTv
+    lxPxv_lxTv = AppThm lxPx_lxT (Refl v)
+    lxPx_lxT = EqMp (BetaConv (concl lPP_lxTlxPx)) lPP_lxTlxPx
+    lPP_lxTlxPx = EqMp (AppThm fa_lPP_lxT (Refl lxPx)) fa_lxPx
+    lxPx = rand (concl th)
+    fa_lPP_lxT = InstA ty forall_def
+    fa_lxPx = th
+    ty = tyof v
+    v = tm
 instance (Loggable a, Loggable b) => Loggable (a,b) where
   key (a,b) = OPair (key a, key b)
   log (a,b) = do
@@ -176,6 +293,47 @@ instance Loggable Proof where
     log th
     logCommand "subst"
 logNum :: Int -> IO ()
-logNum n = logCommand . show
-type Dict = Map Object Int
-data Logged a = Logged (Dict -> (Dict, IO a))
+logNum = logCommand . show
+
+bit_tm s = ConstTerm (Const (numns ("bit"++s))) (fn num num)
+bit0_tm = bit_tm "0"
+bit1_tm = bit_tm "1"
+bit0 = AppTerm bit0_tm
+bit1 = AppTerm bit1_tm
+bit2 = AppTerm (bit_tm "2")
+zero = ConstTerm (Const (numns "zero")) num
+suc = AppTerm (ConstTerm (Const (numns "suc")) (fn num num))
+nv = Var (Name ([],"n"),num)
+n = VarTerm nv
+th1 = Axiom (forall nv (eqn (bit2 n) (suc (bit1 n))))
+th2 = Axiom (eqn (suc zero) (bit1 zero))
+th3 = Axiom (forall nv (eqn (suc (bit0 n)) (bit1 n)))
+th4 = Axiom (forall nv (eqn (suc (bit1 n)) (bit0 (suc n))))
+data Norrish =
+    NZero
+  | NBit1 Norrish
+  | NBit2 Norrish
+n2t NZero = zero
+n2t (NBit1 n) = bit1 (n2t n)
+n2t (NBit2 n) = bit2 (n2t n)
+data Binary =
+    BZero
+  | BBit0 Binary
+  | BBit1 Binary
+t2b tm = if tm == zero then BZero else
+         if rator tm == bit0_tm then BBit0 (t2b (rand tm)) else
+         if rator tm == bit1_tm then BBit1 (t2b (rand tm)) else error "t2b"
+b2t BZero = zero
+b2t (BBit0 b) = bit0 (b2t b)
+b2t (BBit1 b) = bit1 (b2t b)
+data Path = R
+subs [] eq th = eq
+subs (R:rs) eq th = AppThm (Refl f) (subs rs eq th)
+  where (AppTerm f _) = concl th
+binc BZero = th2
+binc (BBit0 n) = spec (b2t n) th3
+binc (BBit1 n) = subs [R,R] (binc n) (spec (b2t n) th4)
+n2b NZero = Refl zero
+n2b (NBit1 n) = AppThm (Refl bit1_tm) (n2b n)
+n2b (NBit2 n) = trans (subs [R,R,R] (n2b n) (spec (n2t n) th1)) (binc nb)
+  where nb = t2b (rhs (concl (n2b n)))
