@@ -153,13 +153,13 @@ strictTotalOrder = record
 fun_tyop : TypeOperator
 fun_tyop = record { name = fromString "->"; arity = 2 }
 infixr 30 _=>_
-_=>_     : Type -> Type -> Type
+_=>_     : ∀ {z} → Type {z} -> Type {z} -> Type {↑ z}
 t₁ => t₂ = TyApp fun_tyop (t₁ ∷ [ t₂ ])
 
 bool_tyop : TypeOperator
 bool_tyop = record { name = fromString "bool"; arity = 0 }
-bool : Type
+bool : ∀ {z} → Type {↑ z}
 bool = TyApp bool_tyop []
 
-α : Type
+α : ∀ {z} → Type {↑ z}
 α = TyVar (fromString "A")
