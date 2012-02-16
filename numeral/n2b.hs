@@ -341,18 +341,17 @@ b2t BZero = zero
 b2t (BBit0 b) = bit0 (b2t b)
 b2t (BBit1 b) = bit1 (b2t b)
 
-data Path = R
-subs [] eq th = eq
-subs (R:rs) eq th = AppThm (Refl f) (subs rs eq th)
-  where (AppTerm f _) = concl th
+subs n eq th = trans th (build n (rhs (concl th))) where
+  build 0 _ = eq
+  build n (AppTerm f x) = AppThm (Refl f) (build (n-1) x)
 
 binc BZero = th2
 binc (BBit0 n) = spec (b2t n) th3
-binc (BBit1 n) = subs [R,R] (binc n) (spec (b2t n) th4)
+binc (BBit1 n) = subs 1 (binc n) (spec (b2t n) th4)
 
 n2b NZero = Refl zero
 n2b (NBit1 n) = AppThm (Refl bit1_tm) (n2b n)
-n2b (NBit2 n) = trans (subs [R,R,R] (n2b n) (spec (n2t n) th1)) (binc nb)
+n2b (NBit2 n) = trans (subs 2 (n2b n) (spec (n2t n) th1)) (binc nb)
   where nb = t2b (rhs (concl (n2b n)))
 
 run h n = withFile h WriteMode f where
