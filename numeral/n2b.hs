@@ -4,9 +4,8 @@ import qualified Data.List as List
 import qualified Data.Map as Map (empty,insert,lookup,size,delete)
 import Data.Maybe (fromJust)
 import Data.Char (isDigit)
-import Control.Monad (liftM)
 import Control.Monad.State (StateT,get,put,liftIO,evalStateT,evalState)
-import System.IO (Handle,withFile,IOMode(WriteMode),hPutStr,hPutStrLn,stdin,stdout,hGetLine)
+import System.IO (Handle,IOMode(WriteMode),hPutStr,hPutStrLn,stdin,stdout,hGetLine)
 import Prelude hiding (log,map,getLine)
 
 data Norrish =
@@ -502,7 +501,3 @@ main = evalStateT c rs where
     liftIO $ evalStateT (logThm (n2b (t2n tm))) ws where
       ws = WriteState {whandle=stdout, wmap=Map.empty}
   rs = Left $ ReadState {rhandle=stdin, rmap=Map.empty, stack=[]}
-
-run h n = withFile h WriteMode f where
-  f h = evalStateT (logThm (n2b n)) (init h)
-  init h = WriteState {whandle=h, wmap=Map.empty}
