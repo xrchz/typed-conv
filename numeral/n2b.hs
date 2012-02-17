@@ -1,11 +1,13 @@
 import Data.Set (Set)
 import Data.Map (Map)
 import qualified Data.List as List
-import qualified Data.Map as Map (empty,insert,lookup,size)
+import qualified Data.Map as Map (empty,insert,lookup,size,delete)
+import Data.Maybe (fromJust)
+import Data.Char (isDigit)
 import Control.Monad (liftM)
 import Control.Monad.State (StateT,get,put,liftIO,evalStateT,evalState)
-import System.IO (Handle,withFile,IOMode(WriteMode),hPutStr,hPutStrLn)
-import Prelude hiding (log,map)
+import System.IO (Handle,withFile,IOMode(WriteMode),hPutStr,hPutStrLn,stdin,stdout,hGetLine)
+import Prelude hiding (log,map,getLine)
 
 data Norrish =
     NZero
@@ -57,6 +59,10 @@ suc  = AppTerm (ConstTerm (Const (numns "suc")) (fn num num))
 n2t NZero = zero
 n2t (NBit1 n) = bit1 (n2t n)
 n2t (NBit2 n) = bit2 (n2t n)
+-- Term -> Norrish
+t2n tm = if tm == zero then NZero else
+         if rator tm == bit1_tm then NBit1 (t2n (rand tm)) else
+         if rator tm == bit2_tm then NBit2 (t2n (rand tm)) else error "t2n"
 
 -- Term -> Binary
 t2b tm = if tm == zero then BZero else
@@ -199,24 +205,25 @@ data Object =
   | OVar Var
   | OTypeOp TypeOp
   | OThm Term
+  | ONum Int
   deriving (Eq, Ord)
 
-data State = State {handle :: Handle, map :: Map Object Int}
+data WriteState = WriteState {whandle :: Handle, wmap :: Map Object Int}
 
-type M a = StateT State IO a
+type WM a = StateT WriteState IO a
 
-getHandle = get >>= return . handle
-getMap = get >>= return . map
-putMap m = do
+getField f = get >>= return . f
+
+putWMap m = do
   s <- get
-  put (s {map = m})
+  put (s {wmap = m})
 
 class Loggable a where
   key :: a -> Object
-  log :: a -> M ()
+  log :: a -> WM ()
 
-logRaw s = getHandle >>= liftIO . flip hPutStr s
-logRawLn s = getHandle >>= liftIO . flip hPutStrLn s
+logRaw s = getField whandle >>= liftIO . flip hPutStr s
+logRawLn s = getField whandle >>= liftIO . flip hPutStrLn s
 
 logCommand = logRawLn
 
@@ -245,20 +252,20 @@ instance Loggable Name where
     logComponent logRaw n
     logRawLn "\""
 
-hc :: Loggable a => (a -> M ()) -> a -> M ()
+hc :: Loggable a => (a -> WM ()) -> a -> WM ()
 hc log a = do
-  m <- getMap
+  m <- getField wmap
   case Map.lookup (key a) m of
     Just k -> do
       logNum k
       logCommand "ref"
     Nothing -> do
       log a
-      m <- getMap
+      m <- getField wmap
       let k = Map.size m
       logNum k
       logCommand "def"
-      putMap (Map.insert (key a) k m)
+      putWMap (Map.insert (key a) k m)
 
 instance Loggable a => Loggable [a] where
   key = OList . (List.map key)
@@ -393,6 +400,109 @@ instance Show Term where
   show (ConstTerm c ty) = show c
   show (VarTerm v) = show v
 
+data ReadState = ReadState {rhandle :: Handle, rmap :: Map Int Object, stack :: [Object]}
+
+getStack = do
+  Left s <- get
+  return $ stack s
+putStack x = do
+  Left s <- get
+  put $ Left (s {stack = x})
+putRMap m = do
+  Left s <- get
+  put $ Left (s {rmap = m})
+
+getLine = do
+  Left s <- get
+  liftIO $ hGetLine (rhandle s)
+
+type RM a = StateT (Either ReadState Term) IO a
+
+-- in the absence of Data.DList...
+empty = []
+toList ls = ls
+snoc ls x = ls ++ [x]
+
+readName s = r s empty empty where
+  r [] ns n = Name (toList ns, toList n)
+  r ('\\':c:cs) ns n = r cs ns (snoc n c)
+  r ('.':cs) ns n = r cs (snoc ns (toList n)) empty
+  r (c:cs) ns n = r cs ns (snoc n c)
+
+readTerm = do
+  l <- getLine
+  case l of
+    '"':s -> do
+      stack <- getStack
+      putStack $ OName (readName (init s)) : stack
+    s@(c:cs) | isDigit c || c == '-' -> do
+      stack <- getStack
+      putStack $ ONum (read s) : stack
+    "absTerm" -> do
+      OTerm b : OVar v : stack <- getStack
+      putStack $ OTerm (AbsTerm v b) : stack
+    "appTerm" -> do
+      OTerm x : OTerm f : stack <- getStack
+      putStack $ OTerm (AppTerm f x) : stack
+    "axiom" -> do
+      OTerm tm : OList [] : _ <- getStack
+      put (Right tm)
+    "cons" -> do
+      OList t : h : stack <- getStack
+      putStack $ OList (h : t) : stack
+    "const" -> do
+      OName n : stack <- getStack
+      putStack $ OConst (Const n) : stack
+    "constTerm" -> do
+      OType ty : OConst c : stack <- getStack
+      putStack $ OTerm (ConstTerm c ty) : stack
+    "def" -> do
+      ONum k : x : stack <- getStack
+      Left s <- get
+      put $ Left (s {stack = x : stack, rmap = Map.insert k x (rmap s)})
+    "nil" -> do
+      stack <- getStack
+      putStack $ OList [] : stack
+    "opType" -> do
+      OList ls : OTypeOp op : stack <- getStack
+      putStack $ OType (OpType op (List.map strip ls)) : stack where
+        strip (OType t) = t
+    "pop" -> do
+      x : stack <- getStack
+      putStack stack
+    "ref" -> do
+      Left s <- get
+      let ONum k : st = stack s
+      put $ Left (s {stack = fromJust (Map.lookup k (rmap s)) : st})
+    "remove" -> do
+      Left s <- get
+      let ONum k : st = stack s
+      put $ Left (s {stack = fromJust (Map.lookup k (rmap s)) : st,
+                     rmap = Map.delete k (rmap s)})
+    "typeOp" -> do
+      OName n : stack <- getStack
+      putStack $ OTypeOp (TypeOp n) : stack
+    "var" -> do
+      OType ty : OName n : stack <- getStack
+      putStack $ OVar (Var (n,ty)) : stack
+    "varTerm" -> do
+      OVar v : stack <- getStack
+      putStack $ OTerm (VarTerm v) : stack
+    "varType" -> do
+      OName n : stack <- getStack
+      putStack $ OType (VarType n) : stack
+  s <- get
+  case s of
+    Right (AppTerm _ tm) -> return tm
+    _ -> readTerm
+
+main = evalStateT c rs where
+  c = do
+    tm <- readTerm
+    liftIO $ evalStateT (logThm (n2b (t2n tm))) ws where
+      ws = WriteState {whandle=stdout, wmap=Map.empty}
+  rs = Left $ ReadState {rhandle=stdin, rmap=Map.empty, stack=[]}
+
 run h n = withFile h WriteMode f where
   f h = evalStateT (logThm (n2b n)) (init h)
-  init h = State {handle=h, map=Map.empty}
+  init h = WriteState {whandle=h, wmap=Map.empty}
