@@ -4,7 +4,9 @@ import qualified Data.List as List
 import qualified Data.Map as Map (empty,insert,lookup,size,delete)
 import Data.Maybe (fromJust)
 import Data.Char (isDigit)
+import Data.String (String)
 import Control.Monad.State (StateT,get,put,liftIO,evalStateT,evalState)
+import Control.Monad.Error (throwError,catchError)
 import System.IO (Handle,IOMode(WriteMode),hPutStr,hPutStrLn,stdin,stdout,hGetLine)
 import Prelude hiding (log,map,getLine)
 
@@ -59,9 +61,10 @@ n2t NZero = zero
 n2t (NBit1 n) = bit1 (n2t n)
 n2t (NBit2 n) = bit2 (n2t n)
 -- Term -> Norrish
-t2n tm = if tm == zero then NZero else
-         if rator tm == bit1_tm then NBit1 (t2n (rand tm)) else
-         if rator tm == bit2_tm then NBit2 (t2n (rand tm)) else error "t2n"
+t2n :: Term -> Either String Norrish
+t2n tm = if tm == zero then return NZero else
+         if rator tm == bit1_tm then t2n (rand tm) >>= (return . NBit1) else
+         if rator tm == bit2_tm then t2n (rand tm) >>= (return . NBit2) else throwError "t2n"
 
 -- Term -> Binary
 t2b tm = if tm == zero then BZero else
@@ -130,6 +133,7 @@ data Term =
 data Proof =
     Refl Term
   | AppThm Proof Proof
+  | AbsThm Var Proof
   | EqMp Proof Proof
   | Axiom Term
   | BetaConv Term
@@ -355,6 +359,10 @@ instance Loggable Proof where
       log th1
       log th2
       logCommand "appThm"
+    l (AbsThm v th) = do
+      log v
+      log th
+      logCommand "absThm"
     l (BetaConv tm) = do
       log tm
       logCommand "betaConv"
@@ -495,9 +503,29 @@ readTerm = do
     Right (AppTerm _ tm) -> return tm
     _ -> readTerm
 
+type Conv = Term -> Either String Proof
+tryConv c tm = catchError (c tm) (const (return (Refl tm)))
+orElseConv c1 c2 tm = catchError (c1 tm) (const (c2 tm))
+depthConv :: Conv -> Conv
+depthConv = subConv . depthConv
+subConv c = tryConv (appConv c `orElseConv` absConv c)
+appConv c (AppTerm t1 t2) = do
+  th1 <- tryConv c t1
+  th2 <- tryConv c t2
+  return (AppThm th1 th2)
+appConv c _ = throwError "appConv"
+absConv c (AbsTerm v tm) = do
+  th <- tryConv c tm
+  return (AbsThm v th)
+absConv c _ = throwError "absConv"
+
 main = evalStateT c rs where
   c = do
     tm <- readTerm
-    liftIO $ evalStateT (logThm (n2b (t2n tm))) ws where
+    liftIO $ evalStateT output ws where
       ws = WriteState {whandle=stdout, wmap=Map.empty}
+      output =
+        case depthConv ((flip (>>=) (return . n2b)) . t2n) tm of
+          Right th -> logThm th
+          Left err -> logRawLn err
   rs = Left $ ReadState {rhandle=stdin, rmap=Map.empty, stack=[]}
