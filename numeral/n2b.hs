@@ -522,9 +522,9 @@ absConv c _ = throwError "absConv"
 main = evalStateT c rs where
   c = do
     tm <- readTerm
-    liftIO $ evalStateT output ws where
+    liftIO $ evalStateT (output tm) ws where
       ws = WriteState {whandle=stdout, wmap=Map.empty}
-      output =
+      output tm =
         case depthConv ((flip (>>=) (return . n2b)) . t2n) tm of
           Right th -> logThm th
           Left err -> logRawLn err
