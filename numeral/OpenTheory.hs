@@ -355,6 +355,9 @@ instance Show Term where
 
 data ReadState = ReadState {rhandle :: Handle, rmap :: Map Int Object, stack :: [Object]}
 
+type RM a b = StateT (Either ReadState a) IO b
+
+getStack :: RM a [Object]
 getStack = do
   Left s <- get
   return $ stack s
@@ -365,11 +368,10 @@ putRMap m = do
   Left s <- get
   put $ Left (s {rmap = m})
 
+getLine :: RM a String
 getLine = do
   Left s <- get
   liftIO $ hGetLine (rhandle s)
-
-type RM a = StateT (Either ReadState Term) IO a
 
 -- in the absence of Data.DList...
 empty = []
@@ -382,8 +384,11 @@ readName s = r s empty empty where
   r ('.':cs) ns n = r cs (snoc ns (toList n)) empty
   r (c:cs) ns n = r cs ns (snoc n c)
 
-readTerm :: RM Term
-readTerm = do
+readTerm :: RM Term Term
+readTerm = readArticle (\h c -> put (Right c)) (return . rand)
+
+readArticle :: ([Term] -> Term -> RM a ()) -> (a -> RM a b) -> RM a b
+readArticle axiom handleError = do
   l <- getLine
   case l of
     '"':s -> do
@@ -399,8 +404,8 @@ readTerm = do
       OTerm x : OTerm f : stack <- getStack
       putStack $ OTerm (AppTerm f x) : stack
     "axiom" -> do
-      OTerm tm : OList [] : _ <- getStack
-      put (Right tm)
+      OTerm c : OList h : _ <- getStack
+      axiom (List.map (\(OTerm tm) -> tm) h) c
     "cons" -> do
       OList t : h : stack <- getStack
       putStack $ OList (h : t) : stack
@@ -447,8 +452,8 @@ readTerm = do
       putStack $ OType (VarType n) : stack
   s <- get
   case s of
-    Right (AppTerm _ tm) -> return tm
-    _ -> readTerm
+    Right x -> handleError x
+    _ -> readArticle axiom handleError
 
 type Conv = Term -> Either String Proof
 tryConv :: Conv -> Conv
