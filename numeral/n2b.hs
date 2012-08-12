@@ -63,8 +63,11 @@ n2t (NBit2 n) = bit2 (n2t n)
 -- Term -> Norrish
 t2n :: Term -> Either String Norrish
 t2n tm = if tm == zero then return NZero else
-         if rator tm == bit1_tm then t2n (rand tm) >>= (return . NBit1) else
-         if rator tm == bit2_tm then t2n (rand tm) >>= (return . NBit2) else throwError "t2n"
+         case tm of
+           (AppTerm f x) -> if f == bit1_tm then t2n x >>= (return . NBit1) else
+                            if f == bit2_tm then t2n x >>= (return . NBit2) else
+                            throwError "t2n"
+           _ -> throwError "t2n"
 
 -- Term -> Binary
 t2b tm = if tm == zero then BZero else
@@ -90,7 +93,9 @@ eq ty l r = AppTerm (AppTerm (eq_tm ty) l) r
 eqn = eq num
 
 rator (AppTerm f _) = f
+rator tm = error ("rator " ++ show tm)
 rand (AppTerm _ x) = x
+rand tm = error ("rand " ++ show tm)
 rhs = rand
 
 truth = ConstTerm (Const (boolns "T")) bool
