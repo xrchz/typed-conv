@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveDataTypeable #-}
 module OpenTheory where
 import Data.Map (Map)
 import qualified Data.Map as Map (empty,lookup,size,insert,delete)
@@ -6,8 +7,12 @@ import Data.Maybe (fromJust)
 import Data.Char (isDigit)
 import Control.Monad.Error (throwError,catchError)
 import Control.Monad.State (StateT,get,put,liftIO,evalState)
+import Control.Monad.Trans.State (liftCatch)
+import Data.Typeable (Typeable)
+import Data.Dynamic (Dynamic)
+import Control.Exception (Exception,try,throwIO,throw,catch)
 import System.IO (Handle,IOMode(WriteMode),hPutStr,hPutStrLn,hGetLine)
-import Prelude hiding (log,map,getLine)
+import Prelude hiding (log,map,getLine,catch)
 
 -- subs n (x = y) (|- l = r[x]) = |- l = r[y]
 -- assumes x is the nth operand of r
@@ -40,7 +45,7 @@ truth = ConstTerm (Const (boolns "T")) bool
 forall_tm ty = ConstTerm (Const (boolns "!")) (fn (fn ty bool) bool)
 forall v@(Var (_,ty)) bod = AppTerm (forall_tm ty) (AbsTerm v bod)
 
-forall_def = Axiom
+forall_def = Axiom []
   (eq (fn (fn alpha bool) bool)
     (forall_tm alpha)
     (AbsTerm p
@@ -77,9 +82,16 @@ data Proof =
   | AppThm Proof Proof
   | AbsThm Var Proof
   | EqMp Proof Proof
-  | Axiom Term
+  | Axiom [Term] Term
   | BetaConv Term
-  | InstA Type Proof
+  | Subst ([(Name,Type)],[(Var,Term)]) Proof
+
+instA ty = Subst ([(alpha_nm,ty)],[])
+
+instance Eq Proof where
+  th1 == th2 = concl th1 == concl th2
+
+instance Ord Proof where
 
 trans th1 th2 = EqMp (AppThm (Refl t) th2) th1
   where t = rator (concl th1)
@@ -92,7 +104,7 @@ sym th = EqMp lel_rel lel
     AppTerm (AppTerm e l) r = concl th
     ler = th
 
-spec tm th = EqMp (sym pv_T) (Axiom truth)
+spec tm th = EqMp (sym pv_T) (Axiom [] truth)
   where
     pv_T = trans pv_lxPxv (trans lxPxv_lxTv lxTv_T)
     pv_lxPxv = sym (BetaConv lxPxv) -- P[v] = (\x. P[x]) v
@@ -104,7 +116,7 @@ spec tm th = EqMp (sym pv_T) (Axiom truth)
     lPP_lxTlxPx = EqMp faxPx_ fa_lxPx -- (\P. P = (\x. T)) (\x. P[x])
     faxPx_ = (AppThm fa_lPP_lxT (Refl lxPx)) -- (!x. P[x]) = (\P. P = (\x. T)) (\x. P[x])
     lxPx = rand (concl th)            -- (\x. P[x])
-    fa_lPP_lxT = InstA ty forall_def  -- (!) = (\P. P = (\x. T))
+    fa_lPP_lxT = instA ty forall_def  -- (!) = (\P. P = (\x. T))
     fa_lxPx = th                      -- !x. P[x]
     ty = tyof v
     v = tm
@@ -119,9 +131,9 @@ concl (AbsThm v th) = eq ty (AbsTerm v t1) (AbsTerm v t2)
         (Var (_,tyv)) = v
         ty = fn tyv (tyof t1)
 concl (EqMp th1 th2) = rhs (concl th1)
-concl (Axiom t) = t
+concl (Axiom [] t) = t
 concl (BetaConv tm@(AppTerm (AbsTerm v b) t)) = eq (tyof tm) tm (subst v t b)
-concl (InstA ty th) = tminstA ty (concl th)
+concl (Subst ([(a,ty)],[]) th) = if a == alpha_nm then tminstA ty (concl th) else error "concl Subst"
 
 subst v t tm@(VarTerm v') = if v == v' then t else tm
 subst _ _ tm@(ConstTerm _ _) = tm
@@ -153,7 +165,7 @@ data Object =
   | OConst Const
   | OVar Var
   | OTypeOp TypeOp
-  | OThm Term
+  | OThm Proof
   | ONum Int
   deriving (Eq, Ord)
 
@@ -288,13 +300,13 @@ instance Loggable Term where
       logCommand "varTerm"
 
 instance Loggable Proof where
-  key = OThm . concl
+  key = OThm
   log = hc l where
     l (Refl tm) = do
       log tm
       logCommand "refl"
-    l (Axiom tm) = do
-      log ([]::[Term])
+    l (Axiom hs tm) = do
+      log hs
       log tm
       logCommand "axiom"
     l (EqMp th1 th2) = do
@@ -312,8 +324,8 @@ instance Loggable Proof where
     l (BetaConv tm) = do
       log tm
       logCommand "betaConv"
-    l (InstA ty th) = do
-      log ([(alpha_nm,ty)],[]::[(Var,Term)])
+    l (Subst sigma th) = do
+      log sigma
       log th
       logCommand "subst"
 
@@ -353,25 +365,24 @@ instance Show Term where
   show (ConstTerm c ty) = show c
   show (VarTerm v) = show v
 
-data ReadState = ReadState {rhandle :: Handle, rmap :: Map Int Object, stack :: [Object]}
+data ReadState = ReadState {rhandle :: Handle, rmap :: Map Int Object, stack :: [Object], thms :: [Proof]}
 
-type RM a b = StateT (Either ReadState a) IO b
+type RM = StateT ReadState IO
 
-getStack :: RM a [Object]
-getStack = do
-  Left s <- get
-  return $ stack s
+getStack :: RM [Object]
+getStack = get >>= return . stack
 putStack x = do
-  Left s <- get
-  put $ Left (s {stack = x})
+  s <- get
+  put $ (s {stack = x})
+addThm th = do
+  s <- get
+  put $ (s {thms = th : (thms s)})
 putRMap m = do
-  Left s <- get
-  put $ Left (s {rmap = m})
+  s <- get
+  put $ (s {rmap = m})
 
-getLine :: RM a String
-getLine = do
-  Left s <- get
-  liftIO $ hGetLine (rhandle s)
+getLine :: RM (Either IOError String)
+getLine = get >>= (liftIO . try . hGetLine . rhandle)
 
 -- in the absence of Data.DList...
 empty = []
@@ -384,76 +395,113 @@ readName s = r s empty empty where
   r ('.':cs) ns n = r cs (snoc ns (toList n)) empty
   r (c:cs) ns n = r cs ns (snoc n c)
 
-readTerm :: RM Term Term
-readTerm = readArticle (\h c -> put (Right c)) (return . rand)
+data TermEx = TermEx Term
+  deriving (Show, Typeable)
+unEx (TermEx t) = t
+instance Exception TermEx
 
-readArticle :: ([Term] -> Term -> RM a ()) -> (a -> RM a b) -> RM a b
-readArticle axiom handleError = do
+defaultHandler :: Dynamic -> a
+defaultHandler = throw
+
+readTerm :: RM Term
+readTerm = readArticle (\_ c _ -> liftIO $ throwIO (TermEx c)) (return . rand . unEx) undefined
+
+thmsOnEOF :: RM [Proof]
+thmsOnEOF = get >>= return . thms
+
+readArticle :: Exception e => ([Term] -> Term -> [Object] -> RM ()) -> (e -> RM a) -> RM a -> RM a
+readArticle axiom handleError handleEOF = do
   l <- getLine
   case l of
-    '"':s -> do
-      stack <- getStack
-      putStack $ OName (readName (init s)) : stack
-    s@(c:cs) | isDigit c || c == '-' -> do
-      stack <- getStack
-      putStack $ ONum (read s) : stack
-    "absTerm" -> do
-      OTerm b : OVar v : stack <- getStack
-      putStack $ OTerm (AbsTerm v b) : stack
-    "appTerm" -> do
-      OTerm x : OTerm f : stack <- getStack
-      putStack $ OTerm (AppTerm f x) : stack
-    "axiom" -> do
-      OTerm c : OList h : _ <- getStack
-      axiom (List.map (\(OTerm tm) -> tm) h) c
-    "cons" -> do
-      OList t : h : stack <- getStack
-      putStack $ OList (h : t) : stack
-    "const" -> do
-      OName n : stack <- getStack
-      putStack $ OConst (Const n) : stack
-    "constTerm" -> do
-      OType ty : OConst c : stack <- getStack
-      putStack $ OTerm (ConstTerm c ty) : stack
-    "def" -> do
-      ONum k : x : stack <- getStack
-      Left s <- get
-      put $ Left (s {stack = x : stack, rmap = Map.insert k x (rmap s)})
-    "nil" -> do
-      stack <- getStack
-      putStack $ OList [] : stack
-    "opType" -> do
-      OList ls : OTypeOp op : stack <- getStack
-      putStack $ OType (OpType op (List.map strip ls)) : stack where
-        strip (OType t) = t
-    "pop" -> do
-      x : stack <- getStack
-      putStack stack
-    "ref" -> do
-      Left s <- get
-      let ONum k : st = stack s
-      put $ Left (s {stack = fromJust (Map.lookup k (rmap s)) : st})
-    "remove" -> do
-      Left s <- get
-      let ONum k : st = stack s
-      put $ Left (s {stack = fromJust (Map.lookup k (rmap s)) : st,
-                     rmap = Map.delete k (rmap s)})
-    "typeOp" -> do
-      OName n : stack <- getStack
-      putStack $ OTypeOp (TypeOp n) : stack
-    "var" -> do
-      OType ty : OName n : stack <- getStack
-      putStack $ OVar (Var (n,ty)) : stack
-    "varTerm" -> do
-      OVar v : stack <- getStack
-      putStack $ OTerm (VarTerm v) : stack
-    "varType" -> do
-      OName n : stack <- getStack
-      putStack $ OType (VarType n) : stack
-  s <- get
-  case s of
-    Right x -> handleError x
-    _ -> readArticle axiom handleError
+    Left _ -> handleEOF
+    Right l -> liftCatch catch rm handleError where
+      rm = do
+        r <- case l of
+            '"':s -> do
+              stack <- getStack
+              putStack $ OName (readName (init s)) : stack
+            s@(c:cs) | isDigit c || c == '-' -> do
+              stack <- getStack
+              putStack $ ONum (read s) : stack
+            "absTerm" -> do
+              OTerm b : OVar v : stack <- getStack
+              putStack $ OTerm (AbsTerm v b) : stack
+            "absThm" -> do
+              OThm th : OVar v : stack <- getStack
+              putStack $ OThm (AbsThm v th) : stack
+            "appTerm" -> do
+              OTerm x : OTerm f : stack <- getStack
+              putStack $ OTerm (AppTerm f x) : stack
+            "appThm" -> do
+              OThm th1 : OThm th2 : stack <- getStack
+              putStack $ OThm (AppThm th1 th2) : stack
+            "axiom" -> do
+              OTerm c : OList h : stack <- getStack
+              axiom (List.map (\(OTerm tm) -> tm) h) c stack
+            "betaConv" -> do
+              OTerm t : stack <- getStack
+              putStack $ OThm (BetaConv t) : stack
+            "cons" -> do
+              OList t : h : stack <- getStack
+              putStack $ OList (h : t) : stack
+            "const" -> do
+              OName n : stack <- getStack
+              putStack $ OConst (Const n) : stack
+            "constTerm" -> do
+              OType ty : OConst c : stack <- getStack
+              putStack $ OTerm (ConstTerm c ty) : stack
+            "def" -> do
+              ONum k : x : stack <- getStack
+              s <- get
+              put $ (s {stack = x : stack, rmap = Map.insert k x (rmap s)})
+            "eqMp" -> do
+              OThm th1 : OThm th2 : stack <- getStack
+              putStack $ OThm (EqMp th2 th1) : stack
+            "nil" -> do
+              stack <- getStack
+              putStack $ OList [] : stack
+            "opType" -> do
+              OList ls : OTypeOp op : stack <- getStack
+              putStack $ OType (OpType op (List.map strip ls)) : stack where
+                strip (OType t) = t
+            "pop" -> do
+              x : stack <- getStack
+              putStack stack
+            "ref" -> do
+              s <- get
+              let ONum k : st = stack s
+              put $ (s {stack = fromJust (Map.lookup k (rmap s)) : st})
+            "refl" -> do
+              OTerm t : stack <- getStack
+              putStack $ OThm (Refl t) : stack
+            "remove" -> do
+              s <- get
+              let ONum k : st = stack s
+              put $ (s {stack = fromJust (Map.lookup k (rmap s)) : st,
+                             rmap = Map.delete k (rmap s)})
+            "subst" -> do
+              OThm th : OList [OList os1, OList os2] : stack <- getStack
+              let s1 = List.map (\(OList [OName n, OType ty]) -> (n,ty)) os1
+              let s2 = List.map (\(OList [OVar  v, OTerm tm]) -> (v,tm)) os2
+              putStack $ OThm (Subst (s1,s2) th) : stack
+            "thm" -> do
+              OTerm c : OList oh : OThm th : stack <- getStack
+              putStack stack
+              addThm th
+            "typeOp" -> do
+              OName n : stack <- getStack
+              putStack $ OTypeOp (TypeOp n) : stack
+            "var" -> do
+              OType ty : OName n : stack <- getStack
+              putStack $ OVar (Var (n,ty)) : stack
+            "varTerm" -> do
+              OVar v : stack <- getStack
+              putStack $ OTerm (VarTerm v) : stack
+            "varType" -> do
+              OName n : stack <- getStack
+              putStack $ OType (VarType n) : stack
+            s -> error ("unknown article command: " ++ s)
+        readArticle axiom handleError handleEOF
 
 type Conv = Term -> Either String Proof
 tryConv :: Conv -> Conv
