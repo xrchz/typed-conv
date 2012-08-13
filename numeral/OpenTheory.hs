@@ -1,5 +1,7 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 module OpenTheory where
+import Data.Set (Set)
+import qualified Data.Set as Set (empty,union,toAscList)
 import Data.Map (Map)
 import qualified Data.Map as Map (empty,lookup,size,insert,delete)
 import qualified Data.List as List (map,intercalate)
@@ -45,7 +47,9 @@ truth = ConstTerm (Const (boolns "T")) bool
 forall_tm ty = ConstTerm (Const (boolns "!")) (fn (fn ty bool) bool)
 forall v@(Var (_,ty)) bod = AppTerm (forall_tm ty) (AbsTerm v bod)
 
-forall_def = Axiom []
+mkAxiom = Axiom Set.empty
+
+forall_def = mkAxiom
   (eq (fn (fn alpha bool) bool)
     (forall_tm alpha)
     (AbsTerm p
@@ -82,16 +86,22 @@ data Proof =
   | AppThm Proof Proof
   | AbsThm Var Proof
   | EqMp Proof Proof
-  | Axiom [Term] Term
+  | Axiom (Set Term) Term
   | BetaConv Term
   | Subst ([(Name,Type)],[(Var,Term)]) Proof
 
 instA ty = Subst ([(alpha_nm,ty)],[])
 
 instance Eq Proof where
-  th1 == th2 = concl th1 == concl th2
+  th1 == th2 =
+    hyp th1 == hyp th2 &&
+    concl th1 == concl th2
 
 instance Ord Proof where
+  compare th1 th2 =
+    case compare (hyp th1) (hyp th2) of
+      EQ -> compare (concl th1) (concl th2)
+      x -> x
 
 trans th1 th2 = EqMp (AppThm (Refl t) th2) th1
   where t = rator (concl th1)
@@ -104,7 +114,7 @@ sym th = EqMp lel_rel lel
     AppTerm (AppTerm e l) r = concl th
     ler = th
 
-spec tm th = EqMp (sym pv_T) (Axiom [] truth)
+spec tm th = EqMp (sym pv_T) (mkAxiom truth)
   where
     pv_T = trans pv_lxPxv (trans lxPxv_lxTv lxTv_T)
     pv_lxPxv = sym (BetaConv lxPxv) -- P[v] = (\x. P[x]) v
@@ -131,9 +141,17 @@ concl (AbsThm v th) = eq ty (AbsTerm v t1) (AbsTerm v t2)
         (Var (_,tyv)) = v
         ty = fn tyv (tyof t1)
 concl (EqMp th1 th2) = rhs (concl th1)
-concl (Axiom [] t) = t
+concl (Axiom h c) = c
 concl (BetaConv tm@(AppTerm (AbsTerm v b) t)) = eq (tyof tm) tm (subst v t b)
 concl (Subst ([(a,ty)],[]) th) = if a == alpha_nm then tminstA ty (concl th) else error "concl Subst"
+
+hyp (Refl t) = Set.empty
+hyp (AppThm th1 th2) = Set.union (hyp th1) (hyp th2)
+hyp (AbsThm _ th) = hyp th
+hyp (EqMp th1 th2) = Set.union (hyp th1) (hyp th2)
+hyp (Axiom h c) = h
+hyp (BetaConv t) = Set.empty
+hyp (Subst _ th) = Set.empty
 
 subst v t tm@(VarTerm v') = if v == v' then t else tm
 subst _ _ tm@(ConstTerm _ _) = tm
@@ -213,7 +231,7 @@ instance Loggable Name where
     logComponent logRaw n
     logRawLn "\""
 
-hc :: Loggable a => (a -> WM ()) -> a -> WM ()
+hc :: (Loggable a,Show a) => (a -> WM ()) -> a -> WM ()
 hc log a = do
   m <- getField wmap
   case Map.lookup (key a) m of
@@ -228,7 +246,7 @@ hc log a = do
       logCommand "def"
       putWMap (Map.insert (key a) k m)
 
-instance Loggable a => Loggable [a] where
+instance (Loggable a,Show a) => Loggable [a] where
   key = OList . (List.map key)
   log = hc l where
     l [] = logCommand "nil"
@@ -237,7 +255,11 @@ instance Loggable a => Loggable [a] where
       log xs
       logCommand "cons"
 
-instance (Loggable a, Loggable b) => Loggable (a,b) where
+instance (Loggable a,Show a) => Loggable (Set a) where
+  key = key . Set.toAscList
+  log = log . Set.toAscList
+
+instance (Loggable a, Loggable b, Show a, Show b) => Loggable (a,b) where
   key (a,b) = OPair (key a, key b)
   log = hc l where
     l (a,b) = do
@@ -331,7 +353,7 @@ instance Loggable Proof where
 
 logThm th = do
   log th
-  log ([]::[Term])
+  log (hyp th)
   log (concl th)
   logCommand "thm"
 
@@ -364,6 +386,9 @@ instance Show Term where
   show (AppTerm t1 t2) = "("++(show t1)++" "++(show t2)++")"
   show (ConstTerm c ty) = show c
   show (VarTerm v) = show v
+
+instance Show Proof where
+  show th = show (hyp th) ++ " |- " ++ show (concl th)
 
 data ReadState = ReadState {rhandle :: Handle, rmap :: Map Int Object, stack :: [Object], thms :: [Proof]}
 
@@ -404,104 +429,106 @@ defaultHandler :: Dynamic -> a
 defaultHandler = throw
 
 readTerm :: RM Term
-readTerm = readArticle (\_ c _ -> liftIO $ throwIO (TermEx c)) (return . rand . unEx) undefined
+readTerm = readArticle throwAxiom (return . rand . unEx) undefined where
+  throwAxiom _ c _ = liftIO $ throwIO (TermEx c)
 
 thmsOnEOF :: RM [Proof]
 thmsOnEOF = get >>= return . thms
 
 readArticle :: Exception e => ([Term] -> Term -> [Object] -> RM ()) -> (e -> RM a) -> RM a -> RM a
-readArticle axiom handleError handleEOF = do
-  l <- getLine
-  case l of
-    Left _ -> handleEOF
-    Right l -> liftCatch catch rm handleError where
-      rm = do
-        r <- case l of
-            '"':s -> do
-              stack <- getStack
-              putStack $ OName (readName (init s)) : stack
-            s@(c:cs) | isDigit c || c == '-' -> do
-              stack <- getStack
-              putStack $ ONum (read s) : stack
-            "absTerm" -> do
-              OTerm b : OVar v : stack <- getStack
-              putStack $ OTerm (AbsTerm v b) : stack
-            "absThm" -> do
-              OThm th : OVar v : stack <- getStack
-              putStack $ OThm (AbsThm v th) : stack
-            "appTerm" -> do
-              OTerm x : OTerm f : stack <- getStack
-              putStack $ OTerm (AppTerm f x) : stack
-            "appThm" -> do
-              OThm th1 : OThm th2 : stack <- getStack
-              putStack $ OThm (AppThm th1 th2) : stack
-            "axiom" -> do
-              OTerm c : OList h : stack <- getStack
-              axiom (List.map (\(OTerm tm) -> tm) h) c stack
-            "betaConv" -> do
-              OTerm t : stack <- getStack
-              putStack $ OThm (BetaConv t) : stack
-            "cons" -> do
-              OList t : h : stack <- getStack
-              putStack $ OList (h : t) : stack
-            "const" -> do
-              OName n : stack <- getStack
-              putStack $ OConst (Const n) : stack
-            "constTerm" -> do
-              OType ty : OConst c : stack <- getStack
-              putStack $ OTerm (ConstTerm c ty) : stack
-            "def" -> do
-              ONum k : x : stack <- getStack
-              s <- get
-              put $ (s {stack = x : stack, rmap = Map.insert k x (rmap s)})
-            "eqMp" -> do
-              OThm th1 : OThm th2 : stack <- getStack
-              putStack $ OThm (EqMp th2 th1) : stack
-            "nil" -> do
-              stack <- getStack
-              putStack $ OList [] : stack
-            "opType" -> do
-              OList ls : OTypeOp op : stack <- getStack
-              putStack $ OType (OpType op (List.map strip ls)) : stack where
-                strip (OType t) = t
-            "pop" -> do
-              x : stack <- getStack
-              putStack stack
-            "ref" -> do
-              s <- get
-              let ONum k : st = stack s
-              put $ (s {stack = fromJust (Map.lookup k (rmap s)) : st})
-            "refl" -> do
-              OTerm t : stack <- getStack
-              putStack $ OThm (Refl t) : stack
-            "remove" -> do
-              s <- get
-              let ONum k : st = stack s
-              put $ (s {stack = fromJust (Map.lookup k (rmap s)) : st,
-                             rmap = Map.delete k (rmap s)})
-            "subst" -> do
-              OThm th : OList [OList os1, OList os2] : stack <- getStack
-              let s1 = List.map (\(OList [OName n, OType ty]) -> (n,ty)) os1
-              let s2 = List.map (\(OList [OVar  v, OTerm tm]) -> (v,tm)) os2
-              putStack $ OThm (Subst (s1,s2) th) : stack
-            "thm" -> do
-              OTerm c : OList oh : OThm th : stack <- getStack
-              putStack stack
-              addThm th
-            "typeOp" -> do
-              OName n : stack <- getStack
-              putStack $ OTypeOp (TypeOp n) : stack
-            "var" -> do
-              OType ty : OName n : stack <- getStack
-              putStack $ OVar (Var (n,ty)) : stack
-            "varTerm" -> do
-              OVar v : stack <- getStack
-              putStack $ OTerm (VarTerm v) : stack
-            "varType" -> do
-              OName n : stack <- getStack
-              putStack $ OType (VarType n) : stack
-            s -> error ("unknown article command: " ++ s)
-        readArticle axiom handleError handleEOF
+readArticle axiom handleError handleEOF = loop where
+  loop = do
+    l <- getLine
+    case l of
+      Left _ -> handleEOF
+      Right l -> do
+        liftCatch catch (rm >> loop) handleError
+        where
+        rm = case l of
+          '"':s -> do
+            stack <- getStack
+            putStack $ OName (readName (init s)) : stack
+          s@(c:cs) | isDigit c || c == '-' -> do
+            stack <- getStack
+            putStack $ ONum (read s) : stack
+          "absTerm" -> do
+            OTerm b : OVar v : stack <- getStack
+            putStack $ OTerm (AbsTerm v b) : stack
+          "absThm" -> do
+            OThm th : OVar v : stack <- getStack
+            putStack $ OThm (AbsThm v th) : stack
+          "appTerm" -> do
+            OTerm x : OTerm f : stack <- getStack
+            putStack $ OTerm (AppTerm f x) : stack
+          "appThm" -> do
+            OThm th1 : OThm th2 : stack <- getStack
+            putStack $ OThm (AppThm th1 th2) : stack
+          "axiom" -> do
+            OTerm c : OList h : stack <- getStack
+            axiom (List.map (\(OTerm tm) -> tm) h) c stack
+          "betaConv" -> do
+            OTerm t : stack <- getStack
+            putStack $ OThm (BetaConv t) : stack
+          "cons" -> do
+            OList t : h : stack <- getStack
+            putStack $ OList (h : t) : stack
+          "const" -> do
+            OName n : stack <- getStack
+            putStack $ OConst (Const n) : stack
+          "constTerm" -> do
+            OType ty : OConst c : stack <- getStack
+            putStack $ OTerm (ConstTerm c ty) : stack
+          "def" -> do
+            ONum k : x : stack <- getStack
+            s <- get
+            put $ (s {stack = x : stack, rmap = Map.insert k x (rmap s)})
+          "eqMp" -> do
+            OThm th1 : OThm th2 : stack <- getStack
+            putStack $ OThm (EqMp th2 th1) : stack
+          "nil" -> do
+            stack <- getStack
+            putStack $ OList [] : stack
+          "opType" -> do
+            OList ls : OTypeOp op : stack <- getStack
+            putStack $ OType (OpType op (List.map strip ls)) : stack where
+              strip (OType t) = t
+          "pop" -> do
+            x : stack <- getStack
+            putStack stack
+          "ref" -> do
+            s <- get
+            let ONum k : st = stack s
+            put $ (s {stack = fromJust (Map.lookup k (rmap s)) : st})
+          "refl" -> do
+            OTerm t : stack <- getStack
+            putStack $ OThm (Refl t) : stack
+          "remove" -> do
+            s <- get
+            let ONum k : st = stack s
+            put $ (s {stack = fromJust (Map.lookup k (rmap s)) : st,
+                           rmap = Map.delete k (rmap s)})
+          "subst" -> do
+            OThm th : OList [OList os1, OList os2] : stack <- getStack
+            let s1 = List.map (\(OList [OName n, OType ty]) -> (n,ty)) os1
+            let s2 = List.map (\(OList [OVar  v, OTerm tm]) -> (v,tm)) os2
+            putStack $ OThm (Subst (s1,s2) th) : stack
+          "thm" -> do
+            OTerm c : OList oh : OThm th : stack <- getStack
+            putStack stack
+            addThm th
+          "typeOp" -> do
+            OName n : stack <- getStack
+            putStack $ OTypeOp (TypeOp n) : stack
+          "var" -> do
+            OType ty : OName n : stack <- getStack
+            putStack $ OVar (Var (n,ty)) : stack
+          "varTerm" -> do
+            OVar v : stack <- getStack
+            putStack $ OTerm (VarTerm v) : stack
+          "varType" -> do
+            OName n : stack <- getStack
+            putStack $ OType (VarType n) : stack
+          s -> error ("unknown article command: " ++ s)
 
 type Conv = Term -> Either String Proof
 tryConv :: Conv -> Conv

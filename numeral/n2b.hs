@@ -27,10 +27,10 @@ binc BZero = th2
 binc (BBit0 n) = spec (b2t n) th3
 binc (BBit1 n) = subs 1 (binc n) (spec (b2t n) th4)
 
-th1 = Axiom [] (forall vn (eqn (bit2 n) (suc (bit1 n))))
-th2 = Axiom [] (eqn (suc zero) (bit1 zero))
-th3 = Axiom [] (forall vn (eqn (suc (bit0 n)) (bit1 n)))
-th4 = Axiom [] (forall vn (eqn (suc (bit1 n)) (bit0 (suc n))))
+th1 = mkAxiom (forall vn (eqn (bit2 n) (suc (bit1 n))))
+th2 = mkAxiom (eqn (suc zero) (bit1 zero))
+th3 = mkAxiom (forall vn (eqn (suc (bit0 n)) (bit1 n)))
+th4 = mkAxiom (forall vn (eqn (suc (bit1 n)) (bit0 (suc n))))
 
 vn = Var (Name ([],"n"),num)
 n  = VarTerm vn
@@ -71,10 +71,9 @@ b2t (BBit1 b) = bit1 (b2t b)
 main = evalStateT c rs where
   c = do
     tm <- readTerm
-    liftIO $ evalStateT (output tm) ws where
-      ws = WriteState {whandle=stdout, wmap=Map.empty}
-      output tm =
-        case depthConv ((flip (>>=) (return . n2b)) . t2n) tm of
-          Right th -> logThm th
-          Left err -> logRawLn err
+    let m = case depthConv ((flip (>>=) (return . n2b)) . t2n) tm of
+              Right th -> logThm th
+              Left err -> logRawLn err
+    liftIO $ evalStateT m ws
+  ws = WriteState {whandle=stdout, wmap=Map.empty}
   rs = ReadState {rhandle=stdin, rmap=Map.empty, stack=[], thms=[]}
