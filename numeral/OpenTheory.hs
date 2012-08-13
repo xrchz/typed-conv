@@ -169,10 +169,12 @@ termSubst s c@(ConstTerm _ _) = c
 termSubst s (AppTerm t1 t2) = AppTerm (termSubst s t1) (termSubst s t2)
 termSubst s (AbsTerm v b) = AbsTerm v (termSubst (Map.delete v s) b)
 
-termSubstType s (VarTerm (Var (n,ty))) = VarTerm (Var (n,(typeSubst s ty)))
+varSubstType s (Var (n,ty)) = Var (n,typeSubst s ty)
+
+termSubstType s (VarTerm v) = VarTerm (varSubstType s v)
 termSubstType s (ConstTerm n ty) = ConstTerm n (typeSubst s ty)
 termSubstType s (AppTerm t1 t2) = AppTerm (termSubstType s t1) (termSubstType s t2)
-termSubstType s (AbsTerm v b) = AbsTerm v (termSubstType s b)
+termSubstType s (AbsTerm v b) = AbsTerm (varSubstType s v) (termSubstType s b)
 
 tyof (VarTerm (Var (_,ty))) = ty
 tyof (ConstTerm _ ty) = ty
