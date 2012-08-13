@@ -11,5 +11,5 @@ main = evalStateT c rs where
     liftIO $ evalStateT (output thms) ws where
       ws = WriteState {whandle=stdout, wmap=Map.empty}
       output [th1,th2] = logThm (EqMp th1 th2)
-      output _ = error "didn't get exactly 2 theorems"
+      output ls = error ("got bad thms: "++show ls)
   rs = ReadState {rhandle=stdin, rmap=Map.empty, stack=[], thms=[]}

@@ -1,9 +1,9 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 module OpenTheory where
 import Data.Set (Set)
-import qualified Data.Set as Set (empty,union,toAscList)
+import qualified Data.Set as Set (empty,union,delete,toAscList)
 import Data.Map (Map)
-import qualified Data.Map as Map (empty,lookup,size,insert,delete)
+import qualified Data.Map as Map (empty,lookup,size,insert,delete,singleton,findWithDefault,fromList,toAscList)
 import qualified Data.List as List (map,intercalate)
 import Data.Maybe (fromJust)
 import Data.Char (isDigit)
@@ -88,9 +88,8 @@ data Proof =
   | EqMp Proof Proof
   | Axiom (Set Term) Term
   | BetaConv Term
-  | Subst ([(Name,Type)],[(Var,Term)]) Proof
-
-instA ty = Subst ([(alpha_nm,ty)],[])
+  | Subst (Map Name Type, Map Var Term) Proof
+  | DeductAntisym Proof Proof
 
 instance Eq Proof where
   th1 == th2 =
@@ -126,7 +125,7 @@ spec tm th = EqMp (sym pv_T) (mkAxiom truth)
     lPP_lxTlxPx = EqMp faxPx_ fa_lxPx -- (\P. P = (\x. T)) (\x. P[x])
     faxPx_ = (AppThm fa_lPP_lxT (Refl lxPx)) -- (!x. P[x]) = (\P. P = (\x. T)) (\x. P[x])
     lxPx = rand (concl th)            -- (\x. P[x])
-    fa_lPP_lxT = instA ty forall_def  -- (!) = (\P. P = (\x. T))
+    fa_lPP_lxT = Subst (Map.singleton alpha_nm ty,Map.empty) forall_def  -- (!) = (\P. P = (\x. T))
     fa_lxPx = th                      -- !x. P[x]
     ty = tyof v
     v = tm
@@ -142,8 +141,11 @@ concl (AbsThm v th) = eq ty (AbsTerm v t1) (AbsTerm v t2)
         ty = fn tyv (tyof t1)
 concl (EqMp th1 th2) = rhs (concl th1)
 concl (Axiom h c) = c
-concl (BetaConv tm@(AppTerm (AbsTerm v b) t)) = eq (tyof tm) tm (subst v t b)
-concl (Subst ([(a,ty)],[]) th) = if a == alpha_nm then tminstA ty (concl th) else error "concl Subst"
+concl (BetaConv tm) = case tm of
+  AppTerm (AbsTerm v b) t -> eq (tyof tm) tm (subst v t b)
+  _ -> error ("concl BetaConv "++show tm)
+concl (Subst (sty,stm) th) = termSubst stm (termSubstType sty (concl th))
+concl (DeductAntisym th1 th2) = eq bool (concl th1) (concl th2)
 
 hyp (Refl t) = Set.empty
 hyp (AppThm th1 th2) = Set.union (hyp th1) (hyp th2)
@@ -152,26 +154,31 @@ hyp (EqMp th1 th2) = Set.union (hyp th1) (hyp th2)
 hyp (Axiom h c) = h
 hyp (BetaConv t) = Set.empty
 hyp (Subst _ th) = Set.empty
+hyp (DeductAntisym th1 th2) =
+  Set.union
+    (Set.delete (concl th2) (hyp th1))
+    (Set.delete (concl th1) (hyp th2))
 
-subst v t tm@(VarTerm v') = if v == v' then t else tm
-subst _ _ tm@(ConstTerm _ _) = tm
-subst v t (AppTerm t1 t2) = AppTerm (subst v t t1) (subst v t t2)
-subst v t tm@(AbsTerm v' b) = if v == v' then tm else AbsTerm v' (subst v t b)
+subst v = termSubst . Map.singleton v
 
-tyinstA t v@(VarType _) = if v == alpha then t else v
-tyinstA t (OpType op args) = (OpType op (List.map (tyinstA t) args))
-tminstA t tm = f tm
-  where
-    f (VarTerm (Var (v,ty))) = VarTerm (Var (v, g ty))
-    f (ConstTerm c ty) = ConstTerm c (g ty)
-    f (AppTerm t1 t2) = AppTerm (f t1) (f t2)
-    f (AbsTerm (Var (v,ty)) tm) = AbsTerm (Var (v, g ty)) (f tm)
-    g = tyinstA t
+typeSubst s v@(VarType k) = Map.findWithDefault v k s
+typeSubst s (OpType op args) = OpType op (List.map (typeSubst s) args)
+
+termSubst s v@(VarTerm k) = Map.findWithDefault v k s
+termSubst s c@(ConstTerm _ _) = c
+termSubst s (AppTerm t1 t2) = AppTerm (termSubst s t1) (termSubst s t2)
+termSubst s (AbsTerm v b) = AbsTerm v (termSubst (Map.delete v s) b)
+
+termSubstType s (VarTerm (Var (n,ty))) = VarTerm (Var (n,(typeSubst s ty)))
+termSubstType s (ConstTerm n ty) = ConstTerm n (typeSubst s ty)
+termSubstType s (AppTerm t1 t2) = AppTerm (termSubstType s t1) (termSubstType s t2)
+termSubstType s (AbsTerm v b) = AbsTerm v (termSubstType s b)
 
 tyof (VarTerm (Var (_,ty))) = ty
 tyof (ConstTerm _ ty) = ty
-tyof (AppTerm f _) = r
-  where OpType _ [_, r] = tyof f
+tyof tm@(AppTerm f _) = case tyof f of
+  OpType _ [_, r] -> r
+  ty -> error ("bad type: "++show ty++"\nfor rator of: "++show tm)
 tyof (AbsTerm (Var (_,x)) t) = fn x (tyof t)
 
 data Object =
@@ -231,7 +238,7 @@ instance Loggable Name where
     logComponent logRaw n
     logRawLn "\""
 
-hc :: (Loggable a,Show a) => (a -> WM ()) -> a -> WM ()
+hc :: Loggable a => (a -> WM ()) -> a -> WM ()
 hc log a = do
   m <- getField wmap
   case Map.lookup (key a) m of
@@ -246,7 +253,7 @@ hc log a = do
       logCommand "def"
       putWMap (Map.insert (key a) k m)
 
-instance (Loggable a,Show a) => Loggable [a] where
+instance Loggable a => Loggable [a] where
   key = OList . (List.map key)
   log = hc l where
     l [] = logCommand "nil"
@@ -255,11 +262,11 @@ instance (Loggable a,Show a) => Loggable [a] where
       log xs
       logCommand "cons"
 
-instance (Loggable a,Show a) => Loggable (Set a) where
+instance Loggable a => Loggable (Set a) where
   key = key . Set.toAscList
   log = log . Set.toAscList
 
-instance (Loggable a, Loggable b, Show a, Show b) => Loggable (a,b) where
+instance (Loggable a, Loggable b) => Loggable (a,b) where
   key (a,b) = OPair (key a, key b)
   log = hc l where
     l (a,b) = do
@@ -268,6 +275,10 @@ instance (Loggable a, Loggable b, Show a, Show b) => Loggable (a,b) where
       logCommand "nil"
       logCommand "cons"
       logCommand "cons"
+
+instance (Loggable k, Loggable v) => Loggable (Map k v) where
+  key = key . Map.toAscList
+  log = log . Map.toAscList
 
 instance Loggable TypeOp where
   key = OTypeOp
@@ -350,6 +361,10 @@ instance Loggable Proof where
       log sigma
       log th
       logCommand "subst"
+    l (DeductAntisym th1 th2) = do
+      log th1
+      log th2
+      logCommand "deductAntisym"
 
 logThm th = do
   log th
@@ -461,8 +476,11 @@ readArticle axiom handleError handleEOF = loop where
             OTerm x : OTerm f : stack <- getStack
             putStack $ OTerm (AppTerm f x) : stack
           "appThm" -> do
-            OThm th1 : OThm th2 : stack <- getStack
+            OThm th2 : OThm th1 : stack <- getStack
             putStack $ OThm (AppThm th1 th2) : stack
+          "assume" -> do
+            OTerm t : stack <- getStack
+            putStack $ OThm (Refl t) : stack
           "axiom" -> do
             OTerm c : OList h : stack <- getStack
             axiom (List.map (\(OTerm tm) -> tm) h) c stack
@@ -478,13 +496,16 @@ readArticle axiom handleError handleEOF = loop where
           "constTerm" -> do
             OType ty : OConst c : stack <- getStack
             putStack $ OTerm (ConstTerm c ty) : stack
+          "deductAntisym" -> do
+            OThm th2 : OThm th1 : stack <- getStack
+            putStack $ OThm (DeductAntisym th1 th2) : stack
           "def" -> do
             ONum k : x : stack <- getStack
             s <- get
             put $ (s {stack = x : stack, rmap = Map.insert k x (rmap s)})
           "eqMp" -> do
-            OThm th1 : OThm th2 : stack <- getStack
-            putStack $ OThm (EqMp th2 th1) : stack
+            OThm th2 : OThm th1 : stack <- getStack
+            putStack $ OThm (EqMp th1 th2) : stack
           "nil" -> do
             stack <- getStack
             putStack $ OList [] : stack
@@ -511,7 +532,7 @@ readArticle axiom handleError handleEOF = loop where
             OThm th : OList [OList os1, OList os2] : stack <- getStack
             let s1 = List.map (\(OList [OName n, OType ty]) -> (n,ty)) os1
             let s2 = List.map (\(OList [OVar  v, OTerm tm]) -> (v,tm)) os2
-            putStack $ OThm (Subst (s1,s2) th) : stack
+            putStack $ OThm (Subst (Map.fromList s1, Map.fromList s2) th) : stack
           "thm" -> do
             OTerm c : OList oh : OThm th : stack <- getStack
             putStack stack
